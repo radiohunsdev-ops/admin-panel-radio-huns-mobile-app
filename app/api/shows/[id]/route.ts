@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Show from "@/models/show";
-
+import "@/models/host";
 interface RouteProps {
   params: Promise<{
     id: string;

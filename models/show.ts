@@ -26,6 +26,7 @@ export interface IShow extends Document {
   status: "active" | "inactive" | "archived";
 }
 
+
 const ShowSchema = new Schema(
   {
     showName: {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Show from "@/models/show";
-
+import "@/models/host";
 export async function GET() {
   try {
     await connectDB();

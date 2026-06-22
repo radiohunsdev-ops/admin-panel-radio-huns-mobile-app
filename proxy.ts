@@ -20,16 +20,6 @@ export function proxy(
   const token =
     request.cookies.get("token")
       ?.value;
-
-  console.log(
-    "PATH:",
-    pathname
-  );
-  console.log(
-    "TOKEN:",
-    token
-  );
-
   // User not logged in
   if (!token) {
     if (
@@ -46,10 +36,7 @@ export function proxy(
   const payload =
     verifyToken(token);
 
-  console.log(
-    "PAYLOAD:",
-    payload
-  );
+  
 
   // Invalid token
   if (!payload) {

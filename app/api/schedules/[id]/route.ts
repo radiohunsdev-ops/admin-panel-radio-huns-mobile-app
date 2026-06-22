@@ -1,18 +1,21 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Schedule from "@/models/schedules";
 import "@/models/show";
 import "@/models/host";
-interface RouteProps {
-  params: {
+type RouteProps = {
+  params: Promise<{
     id: string;
-  };
-}
+  }>;
+};
 
 /**
  * GET SINGLE SCHEDULE
  */
-export async function GET(request: Request, { params }: RouteProps) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     await connectDB();
 
@@ -20,11 +23,10 @@ export async function GET(request: Request, { params }: RouteProps) {
 
     const schedule = await Schedule.findById(id).populate({
       path: "show",
-      select: "showName coverImage  station language",
+      select: "showName coverImage station language",
       populate: {
         path: "host",
-        select:
-          " fullName   coverImage   ",
+        select: "fullName coverImage",
       },
     });
 
@@ -47,7 +49,9 @@ export async function GET(request: Request, { params }: RouteProps) {
       {
         success: false,
         message:
-          error instanceof Error ? error.message : "Something went wrong",
+          error instanceof Error
+            ? error.message
+            : "Something went wrong",
       },
       { status: 500 }
     );

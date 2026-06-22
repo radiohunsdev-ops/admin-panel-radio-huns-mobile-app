@@ -79,7 +79,7 @@ export async function createHost(
 
 export async function getHosts(): Promise<
   Host[]
-> {
+> { 
   try {
     const response = await fetch(API_URL, {
       cache: "no-store",

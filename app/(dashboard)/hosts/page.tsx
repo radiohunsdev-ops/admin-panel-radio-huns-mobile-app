@@ -19,7 +19,7 @@ import {
   Host,
 } from "@/lib/hostApi";
 import { Card } from "@/common/card";
-
+export const dynamic = "force-dynamic";
 export default async function HostsPage() {
   const hosts: Host[] = await getHosts();
 

@@ -16,7 +16,7 @@ import DeleteButton from "@/common/DeleteButton";
 import { IconButton } from "@/common/IconButton";
 import { StatusBadge } from "@/common/StatusBadge";
 import { getShows, Show } from "@/lib/showApi";
-
+export const dynamic = "force-dynamic";
 export default async function ShowsPage() {
   const shows: Show[] = await getShows();
 

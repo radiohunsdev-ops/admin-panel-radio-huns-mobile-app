@@ -21,7 +21,6 @@ type ScheduleBase = {
   send15MinAlert?: boolean;
   send30MinAlert?: boolean;
   sendStartNowAlert?: boolean;
-
   enableSubscriptions?: boolean;
 
   linkedStream?: string;

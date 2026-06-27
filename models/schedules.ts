@@ -26,7 +26,6 @@ export interface ISchedule extends Document {
   send15MinAlert: boolean;
   send30MinAlert: boolean;
   sendStartNowAlert: boolean;
-
   enableSubscriptions: boolean;
 
   linkedStream?: string;

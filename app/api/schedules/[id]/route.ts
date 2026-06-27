@@ -14,7 +14,7 @@ type RouteProps = {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     await connectDB();
@@ -23,10 +23,10 @@ export async function GET(
 
     const schedule = await Schedule.findById(id).populate({
       path: "show",
-      select: "showName coverImage station language",
+      select: "showName shortTitle  description coverImage station language",
       populate: {
         path: "host",
-        select: "fullName coverImage",
+        select: "fullName coverImage, profileImage",
       },
     });
 
@@ -36,7 +36,7 @@ export async function GET(
           success: false,
           message: "Schedule not found",
         },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -49,11 +49,9 @@ export async function GET(
       {
         success: false,
         message:
-          error instanceof Error
-            ? error.message
-            : "Something went wrong",
+          error instanceof Error ? error.message : "Something went wrong",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

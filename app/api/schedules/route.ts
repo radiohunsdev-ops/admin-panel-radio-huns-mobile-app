@@ -3,7 +3,6 @@ import { connectDB } from "@/lib/db";
 
 import Schedule from "@/models/schedules";
 
-
 import "@/models/show";
 import "@/models/host";
 
@@ -14,10 +13,10 @@ export async function GET() {
     const schedules = await Schedule.find()
       .populate({
         path: "show",
-        select: "showName coverImage station language",
+        select: "showName shortTitle  description coverImage station language",
         populate: {
           path: "host",
-          select: "fullName coverImage",
+          select: "fullName coverImage, profileImage",
         },
       })
       .sort({ createdAt: -1 });
@@ -34,11 +33,9 @@ export async function GET() {
       {
         success: false,
         message:
-          error instanceof Error
-            ? error.message
-            : "Something went wrong",
+          error instanceof Error ? error.message : "Something went wrong",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -51,15 +48,14 @@ export async function POST(request: Request) {
 
     const schedule = await Schedule.create(body);
 
-    const populatedSchedule = await Schedule.findById(schedule._id)
-      .populate({
-        path: "show",
-        select: "showName coverImage station language",
-        populate: {
-          path: "host",
-          select: "fullName profileImage email city",
-        },
-      });
+    const populatedSchedule = await Schedule.findById(schedule._id).populate({
+      path: "show",
+      select: "showName coverImage station language",
+      populate: {
+        path: "host",
+        select: "fullName profileImage email city",
+      },
+    });
 
     return NextResponse.json(
       {
@@ -67,7 +63,7 @@ export async function POST(request: Request) {
         message: "Schedule created successfully",
         data: populatedSchedule,
       },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     console.error("POST Schedule Error:", error);
@@ -76,11 +72,9 @@ export async function POST(request: Request) {
       {
         success: false,
         message:
-          error instanceof Error
-            ? error.message
-            : "Something went wrong",
+          error instanceof Error ? error.message : "Something went wrong",
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 }

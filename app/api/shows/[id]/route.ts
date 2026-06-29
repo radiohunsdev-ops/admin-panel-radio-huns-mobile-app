@@ -22,7 +22,7 @@ export async function GET(
       await Show.findById(id)
         .populate(
           "host",
-          "hostName"
+          "fullName profileImage email city"
         );
 
     if (!show) {

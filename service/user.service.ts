@@ -106,7 +106,6 @@ export async function updateProfile(
     updateData.profileImage = data.profileImage;
   }
 
-  console.log("Update Data:", updateData);
 
   return await User.findByIdAndUpdate(
     userId,

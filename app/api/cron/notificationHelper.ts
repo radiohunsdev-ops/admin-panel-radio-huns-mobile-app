@@ -72,7 +72,6 @@ export async function processScheduleNotifications({
     return { sent, failed };
   }
 
-  console.log("Remaining:", remaining);
 
   let notificationType: NotificationType | null = null;
 
@@ -90,8 +89,6 @@ export async function processScheduleNotifications({
 
   const config = notificationConfig[notificationType];
 
-  console.log("Notification type:", notificationType);
-  console.log("Log type:", config.logType);
 
   for (const subscription of subscriptions) {
     try {
@@ -111,7 +108,6 @@ export async function processScheduleNotifications({
       });
 
       if (existingLog) {
-        console.log("Duplicate skipped:", config.logType);
         continue;
       }
 
@@ -159,10 +155,6 @@ export async function processScheduleNotifications({
           active: false,
         });
 
-        console.log(
-          "Disabled invalid token:",
-          subscription.expoPushToken
-        );
       }
 
       await NotificationLog.findByIdAndUpdate(log._id, {

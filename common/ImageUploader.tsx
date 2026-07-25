@@ -36,7 +36,6 @@ export default function ImageUploader({
 
       const data = await response.json();
 
-      console.log("UPLOAD RESPONSE:", data);
 
       if (!response.ok) {
         throw new Error(data?.error || "Upload failed");

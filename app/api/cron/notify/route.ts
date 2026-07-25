@@ -1,13 +1,25 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import NotificationSubscription from "@/models/NotificationSubscription";
 import Schedule from "@/models/schedules";
 import "@/models/show";
 import { processScheduleNotifications } from "../notificationHelper";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Unauthorized",
+      },
+      { status: 401 }
+    );
+  }
+
   try {
     await connectDB();
+
     const [schedules, subscriptions] = await Promise.all([
       Schedule.find({
         status: "published",
@@ -18,7 +30,9 @@ export async function GET() {
         active: true,
       }),
     ]);
+
     const subscriptionMap = new Map<string, typeof subscriptions>();
+
     for (const subscription of subscriptions) {
       const scheduleId = subscription.schedule.toString();
 
@@ -30,9 +44,7 @@ export async function GET() {
     }
 
     let totalSubscribers = 0;
-    let totalNotifications = 0;
 
-    // Process schedules concurrently
     const results = await Promise.all(
       schedules.map(async (schedule) => {
         const scheduleSubscriptions =
@@ -53,7 +65,7 @@ export async function GET() {
       })
     );
 
-    totalNotifications = results.reduce((sum, sent) => sum + sent, 0);
+    const totalNotifications = results.reduce((sum, sent) => sum + sent, 0);
 
     return NextResponse.json({
       success: true,

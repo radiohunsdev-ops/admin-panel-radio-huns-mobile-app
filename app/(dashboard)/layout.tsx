@@ -1,12 +1,7 @@
-// app/layout.tsx
- 
 import "./globals.css";
 import Header from "@/components/admin/Header";
 import Sidebar from "@/components/admin/Sidebar";
-
 import { COLORS } from "@/constants/colors";
-
-
 export default function RootLayout({
   children,
 }: {

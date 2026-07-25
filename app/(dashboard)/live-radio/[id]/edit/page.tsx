@@ -2,24 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Save } from "lucide-react";
 
-import { COLORS } from "@/constants/colors";
+import EntityFormLayout from "@/common/EntityFormLayout";
+import LiveStreamSidebar from "@/app/(dashboard)/live-radio/LiveStreamSidebar";
 
+import { PageLoader } from "@/common/PageLoader";
 
-import { Alert } from "@/common/Alert";
-import { SubmitButton } from "@/common/SubmitButton";
-import { PageHeader } from "@/common/PageHeader";
-import ImageUploader from "@/common/ImageUploader";
+import {
+  getLiveStreamById,
+  updateLiveStream,
+} from "@/lib/livestreameApi";
 
 import LiveStreamFormFields, {
   INITIAL_FORM,
   LiveStreamFormData,
   serializeForm,
 } from "../../LiveStreamFormFields";
-import { getLiveStreamById, updateLiveStream } from "@/lib/livestreameApi";
-import { Card } from "@/common/card";
-import { PageLoader } from "@/common/PageLoader";
 
 interface PageProps {
   params: Promise<{
@@ -33,11 +31,14 @@ export default function EditLiveStreamPage({
   const router = useRouter();
 
   const [id, setId] = useState("");
+
   const [loading, setLoading] = useState(false);
+
   const [pageLoading, setPageLoading] =
     useState(true);
 
   const [error, setError] = useState("");
+
   const [success, setSuccess] = useState("");
 
   const [formData, setFormData] =
@@ -81,9 +82,11 @@ export default function EditLiveStreamPage({
           coverImage:
             stream.coverImage || "",
 
-          logo: stream.logo || "",
+          logo:
+            stream.logo || "",
 
-          genre: stream.genre || "",
+          genre:
+            stream.genre || "",
 
           isActive: String(
             stream.isActive ?? true
@@ -112,7 +115,8 @@ export default function EditLiveStreamPage({
       | HTMLSelectElement
     >
   ) => {
-    const { name, value } = e.target;
+    const { name, value } =
+      e.target;
 
     setFormData((prev) => ({
       ...prev,
@@ -121,13 +125,15 @@ export default function EditLiveStreamPage({
   };
 
   const handleSubmit = async (
-    e: React.FormEvent
+    e: React.FormEvent<HTMLFormElement>
   ) => {
     e.preventDefault();
 
     try {
       setLoading(true);
+
       setError("");
+
       setSuccess("");
 
       const payload =
@@ -165,101 +171,28 @@ export default function EditLiveStreamPage({
   }
 
   return (
-    <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
-      <PageHeader
-        title="Edit Stream"
-        subtitle="Update live stream information."
-        backHref={`/live-radio/${id}`}
-      />
-
-      <Alert
-        type="error"
-        message={error}
-      />
-
-      <Alert
-        type="success"
-        message={success}
-      />
-
-      <form
-        onSubmit={handleSubmit}
-        className="grid grid-cols-1 xl:grid-cols-3 gap-6"
-      >
-        <div className="xl:col-span-2">
-          <Card>
-            <LiveStreamFormFields
-              formData={formData}
-              onChange={handleChange}
-            />
-          </Card>
-        </div>
-
-        <div className="space-y-6">
-          <Card>
-            <h2
-              className="text-xl font-bold mb-4"
-              style={{
-                color: COLORS.text,
-              }}
-            >
-              Station Logo
-            </h2>
-
-            <div
-              className="rounded-2xl overflow-hidden aspect-square flex items-center justify-center"
-              style={{
-                backgroundColor:
-                  COLORS.softCard,
-              }}
-            >
-              <ImageUploader
-                value={
-                  formData.logo || ""
-                }
-                onChange={(url) =>
-                  setFormData(
-                    (prev) => ({
-                      ...prev,
-                      logo: url,
-                    })
-                  )
-                }
-              />
-            </div>
-          </Card>
-
-          <Card>
-            <h2
-              className="text-xl font-bold mb-2"
-              style={{
-                color: COLORS.text,
-              }}
-            >
-              Save Changes
-            </h2>
-
-            <p
-              className="text-sm mb-4"
-              style={{
-                color: COLORS.muted,
-              }}
-            >
-              Changes will be applied
-              immediately to this
-              radio station.
-            </p>
-
-            <SubmitButton
-              loading={loading}
-              label="Save Changes"
-              loadingLabel="Saving..."
-              icon={<Save size={18} />}
-              fullWidth
-            />
-          </Card>
-        </div>
-      </form>
-    </main>
+    <EntityFormLayout
+      title="Edit Stream"
+      subtitle="Update live stream information."
+      backHref={`/live-radio/${id}`}
+      error={error}
+      success={success}
+      loading={loading}
+      submitLabel="Save Changes"
+      loadingLabel="Saving..."
+      onSubmit={handleSubmit}
+      form={
+        <LiveStreamFormFields
+          formData={formData}
+          onChange={handleChange}
+        />
+      }
+      sidebar={
+        <LiveStreamSidebar
+          formData={formData}
+          setFormData={setFormData}
+        />
+      }
+    />
   );
 }

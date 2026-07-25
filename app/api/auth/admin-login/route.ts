@@ -1,7 +1,9 @@
+// app/api/auth/admin-login/route.ts
+
 import { login } from "@/service/auth.service";
 import { NextResponse } from "next/server";
 
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; 
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 export async function POST(request: Request) {
   try {
@@ -15,6 +17,16 @@ export async function POST(request: Request) {
     }
 
     const { token, user } = await login(email, password);
+
+    // Admin-only gate. This endpoint is used exclusively by the
+    // web admin panel — mobile app continues to use /api/auth/login
+    // and is unaffected by this check.
+    if (user.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Access restricted to admin accounts" },
+        { status: 403 }
+      );
+    }
 
     const response = NextResponse.json({
       success: true,
@@ -38,7 +50,7 @@ export async function POST(request: Request) {
 
     return response;
   } catch (error) {
-    console.error("Login error:", error);
+    console.error("Admin login error:", error);
 
     return NextResponse.json(
       {

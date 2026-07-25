@@ -3,6 +3,7 @@ import mongoose, { Schema, Document, Model } from "mongoose";
 export interface IUser extends Document {
   fullName: string;
   email: string;
+  profileImage?: string;
   phone?: string;
   password: string;
   role: "admin" | "manager" | "user";
@@ -11,23 +12,18 @@ export interface IUser extends Document {
   region?: string;
   provider?: "email" | "google" | "apple" | "phone";
   emailVerified: boolean;
-
-  favouriteShows: mongoose.Types.ObjectId[];
   subscribedShows: mongoose.Types.ObjectId[];
-
   listeningHistory: {
     show: mongoose.Types.ObjectId;
     startedAt: Date;
     endedAt: Date;
   }[];
-
   notificationPreferences: {
     showReminder15Min: boolean;
     showReminder30Min: boolean;
     giveawayAlerts: boolean;
     newsAlerts: boolean;
   };
-
   fcmTokens: string[];
 }
 
@@ -38,7 +34,10 @@ const UserSchema = new Schema<IUser>(
       required: true,
       trim: true,
     },
-
+    profileImage: {
+      type: String,
+      default: "",
+    },
     email: {
       type: String,
       required: true,
@@ -80,13 +79,6 @@ const UserSchema = new Schema<IUser>(
       default: false,
     },
 
-    favouriteShows: [
-      {
-        type: Schema.Types.ObjectId,
-        ref: "Show",
-      },
-    ],
-
     subscribedShows: [
       {
         type: Schema.Types.ObjectId,
@@ -94,44 +86,11 @@ const UserSchema = new Schema<IUser>(
       },
     ],
 
-    listeningHistory: [
-      {
-        show: {
-          type: Schema.Types.ObjectId,
-          ref: "Show",
-        },
-        startedAt: Date,
-        endedAt: Date,
-      },
-    ],
-
-    notificationPreferences: {
-      showReminder15Min: {
-        type: Boolean,
-        default: true,
-      },
-
-      showReminder30Min: {
-        type: Boolean,
-        default: false,
-      },
-
-      giveawayAlerts: {
-        type: Boolean,
-        default: true,
-      },
-
-      newsAlerts: {
-        type: Boolean,
-        default: true,
-      },
-    },
-
     fcmTokens: [String],
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 const User: Model<IUser> =

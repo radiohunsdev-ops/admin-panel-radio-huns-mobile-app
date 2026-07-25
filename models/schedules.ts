@@ -1,16 +1,14 @@
-import mongoose, { Schema, Document, Model } from "mongoose";
+import mongoose, { Schema, Document, Model, PopulatedDoc } from "mongoose";
 
-/**
- * Interface
- */
+
+interface IShowRef {
+  _id: mongoose.Types.ObjectId;
+  showName: string;
+  host?: string;
+}
+
 export interface ISchedule extends Document {
-  show:
-    | mongoose.Types.ObjectId
-    | {
-        _id: string;
-        showName: string;
-        host?: string;
-      };
+  show: PopulatedDoc<IShowRef>;
 
   mood?: string;
 
@@ -29,7 +27,6 @@ export interface ISchedule extends Document {
   enableSubscriptions: boolean;
 
   linkedStream?: string;
-
   backupStream?: string;
 
   status: "draft" | "published" | "scheduled" | "archived";

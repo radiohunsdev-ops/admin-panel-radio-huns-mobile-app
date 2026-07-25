@@ -1,32 +1,96 @@
-/* eslint-disable @next/next/no-img-element */
-
 import Link from "next/link";
-import {
-  Eye,
-  Pencil,
-  Plus,
-  Search,
-  User,
-} from "lucide-react";
-
-import { COLORS } from "@/constants/colors";
-import DeleteButton from "@/common/DeleteButton";
-import { IconButton } from "@/common/IconButton";
-import { StatusBadge } from "@/common/StatusBadge";
-
-import {
-  getHosts,
-  Host,
-} from "@/lib/hostApi";
+import { Plus, Search } from "lucide-react";
 import { Card } from "@/common/card";
+import { StatusBadge } from "@/common/StatusBadge";
+import { COLORS } from "@/constants/colors";
+import { getHosts, Host } from "@/lib/hostApi";
+import DataTable, {TableColumn} from "@/components/DataTable/DataTable";
+import TableAvatar from "@/components/DataTable/TableAvatar";
+import { ActionButtons } from "@/components/DataTable/ActionButtons";
+
 export const dynamic = "force-dynamic";
+
 export default async function HostsPage() {
-  const hosts: Host[] = await getHosts();
+  const hosts = await getHosts();
+
+  const columns: TableColumn<Host>[] = [
+    {
+      header: "Host",
+      render: (host) => (
+        <div className="flex items-center gap-4">
+          <TableAvatar
+            image={host.profileImage}
+            alt={host.fullName}
+            size={48}
+          />
+
+          <div>
+            <h3
+              className="font-semibold"
+              style={{ color: COLORS.text }}
+            >
+              {host.fullName}
+            </h3>
+          </div>
+        </div>
+      ),
+    },
+
+    {
+      header: "City",
+      render: (host) => (
+        <span style={{ color: COLORS.text }}>
+          {host.city || "N/A"}
+        </span>
+      ),
+    },
+
+    {
+      header: "Featured",
+      render: (host) => (
+        <span
+          className="text-sm font-medium"
+          style={{
+            color: host.isFeatured
+              ? "#22c55e"
+              : COLORS.muted,
+          }}
+        >
+          {host.isFeatured ? "Featured" : "Normal"}
+        </span>
+      ),
+    },
+
+    {
+      header: "Status",
+      render: (host) => (
+        <StatusBadge
+          status={
+            host.isActive ? "active" : "inactive"
+          }
+          size="sm"
+        />
+      ),
+    },
+
+    {
+      header: "Actions",
+      className: "text-right",
+      render: (host) => (
+        <ActionButtons
+          viewUrl={`/hosts/${host._id}`}
+          editUrl={`/hosts/${host._id}/edit`}
+          deleteId={host._id}
+          deleteType="host"
+        />
+      ),
+    },
+  ];
 
   return (
-    <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
+    <main className="flex-1 overflow-y-auto p-6 lg:p-8">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5 mb-8">
+      <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1
             className="text-4xl font-bold"
@@ -45,7 +109,7 @@ export default async function HostsPage() {
 
         <Link
           href="/hosts/create"
-          className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl font-semibold transition-all duration-300 hover:scale-[1.02]"
+          className="flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-semibold"
           style={{
             backgroundColor: COLORS.primary,
             color: COLORS.background,
@@ -58,7 +122,7 @@ export default async function HostsPage() {
 
       {/* Search */}
       <div
-        className="flex items-center gap-3 px-4 py-3 rounded-2xl border mb-6"
+        className="mb-6 flex items-center gap-3 rounded-2xl border px-4 py-3"
         style={{
           backgroundColor: COLORS.card,
           borderColor: COLORS.border,
@@ -72,306 +136,18 @@ export default async function HostsPage() {
         <input
           type="text"
           placeholder="Search hosts..."
-          className="bg-transparent outline-none w-full"
+          className="w-full bg-transparent outline-none"
           style={{ color: COLORS.text }}
         />
       </div>
 
-      {/* Desktop Table */}
+      {/* Table */}
       <Card className="overflow-hidden p-0">
-        <div className="hidden lg:block overflow-x-auto">
-          <table className="w-full">
-            <thead
-              style={{
-                backgroundColor: COLORS.softCard,
-              }}
-            >
-              <tr>
-                {[
-                  "Host",
-                  "City",
-                  "Featured",
-                  "Status",
-                  "Actions",
-                ].map((col) => (
-                  <th
-                    key={col}
-                    className={`p-5 ${
-                      col === "Actions"
-                        ? "text-right"
-                        : "text-left"
-                    }`}
-                    style={{
-                      color: COLORS.muted,
-                    }}
-                  >
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-
-            <tbody>
-              {hosts.length > 0 ? (
-                hosts.map((host) => (
-                  <tr
-                    key={host._id}
-                    className="border-t"
-                    style={{
-                      borderColor: COLORS.border,
-                    }}
-                  >
-                    <td className="p-5">
-                      <div className="flex items-center gap-4">
-                        <div
-                          className="w-12 h-12 rounded-2xl overflow-hidden flex items-center justify-center"
-                          style={{
-                            backgroundColor:
-                              COLORS.softCard,
-                          }}
-                        >
-                          {host.profileImage ? (
-                            <img
-                              src={host.profileImage}
-                              alt={host.fullName}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <User
-                              size={20}
-                              color={COLORS.primary}
-                            />
-                          )}
-                        </div>
-
-                        <div>
-                          <h3
-                            className="font-semibold"
-                            style={{
-                              color: COLORS.text,
-                            }}
-                          >
-                            {host.fullName}
-                          </h3>
-                        </div>
-                      </div>
-                    </td>
-                    <td
-                      className="p-5"
-                      style={{
-                        color: COLORS.text,
-                      }}
-                    >
-                      {host.city || "N/A"}
-                    </td>
-
-                    <td className="p-5">
-                      <span
-                        className="text-sm font-medium"
-                        style={{
-                          color: host.isFeatured
-                            ? "#22c55e"
-                            : COLORS.muted,
-                        }}
-                      >
-                        {host.isFeatured
-                          ? "Featured"
-                          : "Normal"}
-                      </span>
-                    </td>
-
-                    <td className="p-5">
-                      <StatusBadge
-                        status={
-                          host.isActive
-                            ? "active"
-                            : "inactive"
-                        }
-                        size="sm"
-                      />
-                    </td>
-
-                    <td className="p-5">
-                      <div className="flex items-center justify-end gap-3">
-                        <IconButton
-                          href={`/hosts/${host._id}`}
-                          icon={
-                            <Eye
-                              size={18}
-                              color={COLORS.text}
-                            />
-                          }
-                        />
-
-                        <IconButton
-                          href={`/hosts/${host._id}/edit`}
-                          icon={
-                            <Pencil
-                              size={18}
-                              color={COLORS.primary}
-                            />
-                          }
-                        />
-
-                        <DeleteButton
-                          id={host._id}
-                          type="host"
-                          title="Delete Host"
-                          description="This action cannot be undone."
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="p-10 text-center"
-                    style={{
-                      color: COLORS.muted,
-                    }}
-                  >
-                    No hosts found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile Cards */}
-        <div className="lg:hidden divide-y">
-          {hosts.length > 0 ? (
-            hosts.map((host) => (
-              <div
-                key={host._id}
-                className="p-5"
-              >
-                <div className="flex items-center gap-4">
-                  <div
-                    className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center"
-                    style={{
-                      backgroundColor:
-                        COLORS.softCard,
-                    }}
-                  >
-                    {host.profileImage ? (
-                      <img
-                        src={host.profileImage}
-                        alt={host.fullName}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <User
-                        size={22}
-                        color={COLORS.primary}
-                      />
-                    )}
-                  </div>
-
-                  <div className="flex-1">
-                    <h3
-                      className="font-semibold"
-                      style={{
-                        color: COLORS.text,
-                      }}
-                    >
-                      {host.fullName}
-                    </h3>
-
-                    <p
-                      className="text-sm"
-                      style={{
-                        color: COLORS.muted,
-                      }}
-                    >
-                      {host.email || "N/A"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 space-y-2 text-sm">
-                  <p style={{ color: COLORS.text }}>
-                    <strong>City:</strong>{" "}
-                    {host.city || "N/A"}
-                  </p>
-
-                  <p style={{ color: COLORS.text }}>
-                    <strong>Phone:</strong>{" "}
-                    {host.phone || "N/A"}
-                  </p>
-
-                  <p style={{ color: COLORS.text }}>
-                    <strong>Languages:</strong>{" "}
-                    {host.languages?.join(", ") ||
-                      "N/A"}
-                  </p>
-
-                  <div className="flex items-center gap-3">
-                    <StatusBadge
-                      status={
-                        host.isActive
-                          ? "active"
-                          : "inactive"
-                      }
-                      size="sm"
-                    />
-
-                    {host.isFeatured && (
-                      <span
-                        className="text-sm font-medium"
-                        style={{
-                          color: "#22c55e",
-                        }}
-                      >
-                        Featured
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 mt-4">
-                  <IconButton
-                    href={`/hosts/${host._id}`}
-                    icon={
-                      <Eye
-                        size={18}
-                        color={COLORS.text}
-                      />
-                    }
-                  />
-
-                  <IconButton
-                    href={`/hosts/${host._id}/edit`}
-                    icon={
-                      <Pencil
-                        size={18}
-                        color={COLORS.primary}
-                      />
-                    }
-                  />
-
-                  <DeleteButton
-                    id={host._id}
-                    type="host"
-                    title="Delete Host"
-                    description="This action cannot be undone."
-                  />
-                </div>
-              </div>
-            ))
-          ) : (
-            <div
-              className="p-10 text-center"
-              style={{
-                color: COLORS.muted,
-              }}
-            >
-              No hosts found.
-            </div>
-          )}
-        </div>
+        <DataTable
+          data={hosts}
+          columns={columns}
+          emptyMessage="No hosts found."
+        />
       </Card>
     </main>
   );

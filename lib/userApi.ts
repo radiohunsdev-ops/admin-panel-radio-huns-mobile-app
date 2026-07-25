@@ -53,7 +53,6 @@ export interface UserPayload {
 
   emailVerified?: boolean;
 
-  favouriteShows?: string[];
   subscribedShows?: string[];
 
   listeningHistory?: {
@@ -71,6 +70,7 @@ export interface UserPayload {
    RESPONSE (FROM API)
 ========================= */
 export interface User {
+  profileImage: any;
   _id: string;
 
   fullName: string;
@@ -95,15 +95,6 @@ export interface User {
     | "phone";
 
   emailVerified: boolean;
-
-  favouriteShows:
-    | string[]
-    | {
-        _id: string;
-        showName: string;
-        coverImage?: string;
-      }[];
-
   subscribedShows:
     | string[]
     | {

@@ -1,27 +1,5 @@
-
-
 import { SidebarMenuItem } from "@/types/Siderbar";
-import {
-  Activity,
-  BarChart3,
-  Bell,
-  BookOpen,
-  FileText,
-  Gift,
-  Headphones,
-  LayoutDashboard,
-  Music2,
-  Newspaper,
-  PlayCircle,
-  Radio,
-  Settings,
-  ShieldCheck,
-  Ticket,
-  Users,
-  Video,
-  WalletCards,
-  Waves,
-} from "lucide-react";
+import { Activity, Headphones, LayoutDashboard, Music2, Radio, Users } from "lucide-react";
 
 export const menuItems: SidebarMenuItem[] = [
   {
@@ -49,26 +27,22 @@ export const menuItems: SidebarMenuItem[] = [
     href: "/hosts",
     icon: Headphones,
   },
-  {
-    title: "Hindustan FM",
-    href: "/hindustan-fm",
-    icon: Waves,
-  },
-  {
-    title: "Podcasts",
-    href: "/podcasts",
-    icon: PlayCircle,
-  },
-  {
-    title: "Journal / Blogs",
-    href: "/blogs",
-    icon: Newspaper,
-  },
-  {
-    title: "Contests & Giveaways",
-    href: "/contests",
-    icon: Gift,
-  },
+  
+  // {
+  //   title: "Podcasts",
+  //   href: "/podcasts",
+  //   icon: PlayCircle,
+  // },
+  // {
+  //   title: "Journal / Blogs",
+  //   href: "/blogs",
+  //   icon: Newspaper,
+  // },
+  // {
+  //   title: "Contests & Giveaways",
+  //   href: "/contests",
+  //   icon: Gift,
+  // },
   {
     title: "Users",
     href: "/users",

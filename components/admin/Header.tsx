@@ -1,14 +1,10 @@
 "use client";
-
-import { Bell, ChevronDown, LogOut, Settings, UserCircle2 } from "lucide-react";
-
+import { ChevronDown, LogOut,  UserCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-
 import { COLORS } from "@/constants/colors";
 
 export default function Header() {
   const router = useRouter();
-
 const handleLogout = async () => {
   try {
     const response = await fetch(
@@ -17,11 +13,9 @@ const handleLogout = async () => {
         method: "POST",
       }
     );
-
     if (!response.ok) {
       throw new Error("Logout failed");
     }
-
     router.replace("/login");
     router.refresh();
   } catch (error) {
@@ -40,44 +34,6 @@ const handleLogout = async () => {
       <div />
 
       <div className="flex items-center gap-2">
-        {/* Notifications */}
-        <button
-          className="relative flex h-10 w-10 items-center justify-center rounded-xl transition-all hover:scale-105"
-          style={{
-            backgroundColor: COLORS.softCard,
-          }}
-        >
-          <Bell
-            className="h-5 w-5"
-            style={{
-              color: COLORS.primary,
-            }}
-          />
-
-          <span
-            className="absolute right-2 top-2 h-2 w-2 animate-pulse rounded-full"
-            style={{
-              backgroundColor: "#ef4444",
-            }}
-          />
-        </button>
-
-        {/* Settings */}
-        <button
-          className="hidden h-10 w-10 items-center justify-center rounded-xl transition-all hover:scale-105 md:flex"
-          style={{
-            backgroundColor: COLORS.softCard,
-          }}
-        >
-          <Settings
-            className="h-5 w-5"
-            style={{
-              color: COLORS.primary,
-            }}
-          />
-        </button>
-
-        {/* Profile Dropdown */}
         <div className="group relative">
           <button
             className="flex items-center gap-3 rounded-2xl border px-3 py-2"
@@ -155,16 +111,6 @@ const handleLogout = async () => {
             </div>
 
             <div className="p-2">
-              <button
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all hover:bg-white/5"
-                style={{
-                  color: COLORS.text,
-                }}
-              >
-                <Settings className="h-4 w-4" />
-                Settings
-              </button>
-
               <button
                 onClick={handleLogout}
                 className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all hover:bg-red-500/10"

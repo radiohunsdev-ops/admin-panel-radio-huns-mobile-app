@@ -38,7 +38,7 @@ export default function LoginPage() {
     try {
       const response =
         await fetch(
-          "/api/auth/login",
+          "/api/auth/admin-login",
           {
             method: "POST",
             headers: {
@@ -59,6 +59,13 @@ export default function LoginPage() {
         setError(
           data.message ||
             "Login failed"
+        );
+        return;
+      }
+
+      if (data.user?.role !== "admin") {
+        setError(
+          "Access restricted to admin accounts."
         );
         return;
       }

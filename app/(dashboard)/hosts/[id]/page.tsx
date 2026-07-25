@@ -8,7 +8,6 @@ import {
   Phone,
   MapPin,
   Languages,
-  Tag,
   Globe,
   Star,
   Calendar,

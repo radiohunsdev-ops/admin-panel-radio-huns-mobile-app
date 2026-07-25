@@ -1,29 +1,117 @@
-/* eslint-disable @next/next/no-img-element */
-
 import Link from "next/link";
-import {
-  Eye,
-  Pencil,
-  Plus,
-  Radio,
-  Search,
-} from "lucide-react";
+import { Plus, Search } from "lucide-react";
 
-
-import { COLORS } from "@/constants/colors";
 import { Card } from "@/common/card";
-import DeleteButton from "@/common/DeleteButton";
-import { IconButton } from "@/common/IconButton";
 import { StatusBadge } from "@/common/StatusBadge";
+import { COLORS } from "@/constants/colors";
+
 import { getShows, Show } from "@/lib/showApi";
+
+import DataTable, {
+  TableColumn,
+} from "@/components/DataTable/DataTable";
+import TableAvatar from "@/components/DataTable/TableAvatar";
+import { ActionButtons } from "@/components/DataTable/ActionButtons";
+
 export const dynamic = "force-dynamic";
+
 export default async function ShowsPage() {
-  const shows: Show[] = await getShows();
+  const shows = await getShows();
+
+  const columns: TableColumn<Show>[] = [
+    {
+      header: "Show",
+      render: (show) => (
+        <div className="flex items-center gap-4">
+          <TableAvatar
+            image={show.coverImage}
+            alt={show.showName}
+            size={48}
+          />
+
+          <div>
+            <h3
+              className="font-semibold"
+              style={{ color: COLORS.text }}
+            >
+              {show.showName}
+            </h3>
+
+            <p
+              className="text-sm"
+              style={{ color: COLORS.muted }}
+            >
+              {show.genre || "N/A"}
+            </p>
+          </div>
+        </div>
+      ),
+    },
+
+    {
+      header: "Station",
+      render: (show) => (
+        <span style={{ color: COLORS.text }}>
+          {show.station}
+        </span>
+      ),
+    },
+
+    {
+      header: "Live",
+      render: (show) => (
+        <span
+          className="flex items-center gap-2 text-sm font-medium"
+          style={{
+            color: show.isLive
+              ? "#22c55e"
+              : COLORS.muted,
+          }}
+        >
+          <span
+            className={`h-2 w-2 rounded-full ${
+              show.isLive ? "animate-pulse" : ""
+            }`}
+            style={{
+              backgroundColor: show.isLive
+                ? "#22c55e"
+                : COLORS.muted,
+            }}
+          />
+
+          {show.isLive ? "Live" : "Offline"}
+        </span>
+      ),
+    },
+
+    {
+      header: "Status",
+      render: (show) => (
+        <StatusBadge
+          status={show.status}
+          size="sm"
+        />
+      ),
+    },
+
+    {
+      header: "Actions",
+      className: "text-right",
+      render: (show) => (
+        <ActionButtons
+          viewUrl={`/shows/${show._id}`}
+          editUrl={`/shows/${show._id}/edit`}
+          deleteId={show._id}
+          deleteType="show"
+        />
+      ),
+    },
+  ];
 
   return (
-    <main className="flex-1 p-6 lg:p-8 overflow-y-auto">
+    <main className="flex-1 overflow-y-auto p-6 lg:p-8">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5 mb-8">
+      <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1
             className="text-4xl font-bold"
@@ -42,7 +130,7 @@ export default async function ShowsPage() {
 
         <Link
           href="/shows/create"
-          className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl font-semibold transition-all duration-300 hover:scale-[1.02]"
+          className="flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-semibold"
           style={{
             backgroundColor: COLORS.primary,
             color: COLORS.background,
@@ -55,7 +143,7 @@ export default async function ShowsPage() {
 
       {/* Search */}
       <div
-        className="flex items-center gap-3 px-4 py-3 rounded-2xl border mb-6"
+        className="mb-6 flex items-center gap-3 rounded-2xl border px-4 py-3"
         style={{
           backgroundColor: COLORS.card,
           borderColor: COLORS.border,
@@ -69,342 +157,18 @@ export default async function ShowsPage() {
         <input
           type="text"
           placeholder="Search shows..."
-          className="bg-transparent outline-none w-full"
+          className="w-full bg-transparent outline-none"
           style={{ color: COLORS.text }}
         />
       </div>
 
-      {/* Desktop Table */}
+      {/* Data Table */}
       <Card className="overflow-hidden p-0">
-        <div className="hidden lg:block overflow-x-auto">
-          <table className="w-full">
-            <thead
-              style={{
-                backgroundColor: COLORS.softCard,
-              }}
-            >
-              <tr>
-                {[
-                  "Show",
-                  "Station",
-                  "Live",
-                  "Status",
-                  "Actions",
-                ].map((col) => (
-                  <th
-                    key={col}
-                    className={`p-5 ${
-                      col === "Actions"
-                        ? "text-right"
-                        : "text-left"
-                    }`}
-                    style={{
-                      color: COLORS.muted,
-                    }}
-                  >
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-
-            <tbody>
-              {shows.length > 0 ? (
-                shows.map((show) => (
-                  <tr
-                    key={show._id}
-                    className="border-t"
-                    style={{
-                      borderColor: COLORS.border,
-                    }}
-                  >
-                    {/* Show */}
-                    <td className="p-5">
-                      <div className="flex items-center gap-4">
-                        <div
-                          className="w-12 h-12 rounded-2xl flex items-center justify-center overflow-hidden"
-                          style={{
-                            backgroundColor:
-                              COLORS.softCard,
-                          }}
-                        >
-                          {show.coverImage ? (
-                            <img
-                              src={show.coverImage}
-                              alt={show.showName}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <Radio
-                              size={20}
-                              color={COLORS.primary}
-                            />
-                          )}
-                        </div>
-
-                        <div>
-                          <h3
-                            className="font-semibold"
-                            style={{
-                              color: COLORS.text,
-                            }}
-                          >
-                            {show.showName}
-                          </h3>
-
-                          <p
-                            className="text-sm"
-                            style={{
-                              color: COLORS.muted,
-                            }}
-                          >
-                            {show.genre || "N/A"}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Station */}
-                    <td
-                      className="p-5"
-                      style={{
-                        color: COLORS.text,
-                      }}
-                    >
-                      {show.station}
-                    </td>
-
-                  
-
-                    {/* Live */}
-                    <td className="p-5">
-                      <span
-                        className="flex items-center gap-2 text-sm font-medium"
-                        style={{
-                          color: show.isLive
-                            ? "#22c55e"
-                            : COLORS.muted,
-                        }}
-                      >
-                        <span
-                          className={`w-2 h-2 rounded-full ${
-                            show.isLive
-                              ? "animate-pulse"
-                              : ""
-                          }`}
-                          style={{
-                            backgroundColor:
-                              show.isLive
-                                ? "#22c55e"
-                                : COLORS.muted,
-                          }}
-                        />
-
-                        {show.isLive
-                          ? "Live"
-                          : "Offline"}
-                      </span>
-                    </td>
-
-                    {/* Status */}
-                    <td className="p-5">
-                      <StatusBadge
-                        status={show.status}
-                        size="sm"
-                      />
-                    </td>
-
-                    {/* Actions */}
-                    <td className="p-5">
-                      <div className="flex items-center justify-end gap-3">
-                        <IconButton
-                          href={`/shows/${show._id}`}
-                          icon={
-                            <Eye
-                              size={18}
-                              color={
-                                COLORS.text
-                              }
-                            />
-                          }
-                        />
-
-                        <IconButton
-                          href={`/shows/${show._id}/edit`}
-                          icon={
-                            <Pencil
-                              size={18}
-                              color={
-                                COLORS.primary
-                              }
-                            />
-                          }
-                        />
-
-                        <DeleteButton
-                          id={show._id}
-                          type="show"
-                          title="Delete Show"
-                          description="This action cannot be undone."
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="p-10 text-center"
-                    style={{
-                      color: COLORS.muted,
-                    }}
-                  >
-                    No shows found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile Cards */}
-        <div className="lg:hidden divide-y">
-          {shows.length > 0 ? (
-            shows.map((show) => (
-              <div
-                key={show._id}
-                className="p-5"
-              >
-                <div className="flex items-center gap-4">
-                  <div
-                    className="w-14 h-14 rounded-2xl overflow-hidden flex items-center justify-center"
-                    style={{
-                      backgroundColor:
-                        COLORS.softCard,
-                    }}
-                  >
-                    {show.coverImage ? (
-                      <img
-                        src={show.coverImage}
-                        alt={show.showName}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <Radio
-                        size={22}
-                        color={COLORS.primary}
-                      />
-                    )}
-                  </div>
-
-                  <div className="flex-1">
-                    <h3
-                      className="font-semibold"
-                      style={{
-                        color: COLORS.text,
-                      }}
-                    >
-                      {show.showName}
-                    </h3>
-
-                    <p
-                      className="text-sm"
-                      style={{
-                        color: COLORS.muted,
-                      }}
-                    >
-                      {show.station}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 space-y-2 text-sm">
-                  <p
-                    style={{
-                      color: COLORS.text,
-                    }}
-                  >
-                    <strong>Host:</strong>{" "}
-                    {typeof show.host ===
-                    "object"
-                      ? show.host?.hostName
-                      : show.host}
-                  </p>
-
-                  <p
-                    style={{
-                      color: COLORS.text,
-                    }}
-                  >
-                    <strong>Genre:</strong>{" "}
-                    {show.genre || "N/A"}
-                  </p>
-
-                  <div className="flex items-center gap-3">
-                    <StatusBadge
-                      status={show.status}
-                      size="sm"
-                    />
-
-                    <span
-                      className="text-sm"
-                      style={{
-                        color: show.isLive
-                          ? "#22c55e"
-                          : COLORS.muted,
-                      }}
-                    >
-                      {show.isLive
-                        ? "Live"
-                        : "Offline"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 mt-4">
-                  <IconButton
-                    href={`/shows/${show._id}`}
-                    icon={
-                      <Eye
-                        size={18}
-                        color={COLORS.text}
-                      />
-                    }
-                  />
-
-                  <IconButton
-                    href={`/shows/${show._id}/edit`}
-                    icon={
-                      <Pencil
-                        size={18}
-                        color={
-                          COLORS.primary
-                        }
-                      />
-                    }
-                  />
-
-                  <DeleteButton
-                    id={show._id}
-                    type="show"
-                    title="Delete Show"
-                    description="This action cannot be undone."
-                  />
-                </div>
-              </div>
-            ))
-          ) : (
-            <div
-              className="p-10 text-center"
-              style={{
-                color: COLORS.muted,
-              }}
-            >
-              No shows found.
-            </div>
-          )}
-        </div>
+        <DataTable
+          data={shows}
+          columns={columns}
+          emptyMessage="No shows found."
+        />
       </Card>
     </main>
   );

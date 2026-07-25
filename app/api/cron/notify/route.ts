@@ -1,92 +1,61 @@
-import { NextRequest, NextResponse } from "next/server";
-import { connectDB } from "@/lib/db";
+import { NextResponse } from "next/server";
 import NotificationSubscription from "@/models/NotificationSubscription";
 import Schedule from "@/models/schedules";
-import "@/models/show";
+import { connectDB } from "@/lib/db";
 import { processScheduleNotifications } from "../notificationHelper";
-
-export async function GET(req: NextRequest) {
-  const auth = req.headers.get("authorization");
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json(
-      {
-        success: false,
-        message: "Unauthorized",
-      },
-      { status: 401 }
-    );
-  }
-
+import "@/models/show";
+export async function GET() {
   try {
     await connectDB();
 
-    const [schedules, subscriptions] = await Promise.all([
-      Schedule.find({
-        status: "published",
-        enableSubscriptions: true,
-      }).populate("show"),
+    const schedules = await Schedule.find({
+      status: "published",
+      enableSubscriptions: true,
+    }).populate("show");
 
-      NotificationSubscription.find({
+    const totalSchedules = schedules.length;
+    let totalSubscribers = 0;
+    let totalNotifications = 0;
+
+    for (const schedule of schedules) {
+      const subscriptions = await NotificationSubscription.find({
+        schedule: schedule._id,
         active: true,
-      }),
-    ]);
+      });
 
-    const subscriptionMap = new Map<string, typeof subscriptions>();
+      totalSubscribers += subscriptions.length;
 
-    for (const subscription of subscriptions) {
-      const scheduleId = subscription.schedule.toString();
-
-      if (!subscriptionMap.has(scheduleId)) {
-        subscriptionMap.set(scheduleId, []);
+      if (!subscriptions.length) {
+        continue;
       }
 
-      subscriptionMap.get(scheduleId)!.push(subscription);
+      const result = await processScheduleNotifications({
+        schedule,
+        subscriptions,
+      });
+
+      totalNotifications += result.sent;
     }
-
-    let totalSubscribers = 0;
-
-    const results = await Promise.all(
-      schedules.map(async (schedule) => {
-        const scheduleSubscriptions =
-          subscriptionMap.get(schedule._id.toString()) ?? [];
-
-        totalSubscribers += scheduleSubscriptions.length;
-
-        if (!scheduleSubscriptions.length) {
-          return 0;
-        }
-
-        const { sent } = await processScheduleNotifications({
-          schedule,
-          subscriptions: scheduleSubscriptions,
-        });
-
-        return sent;
-      })
-    );
-
-    const totalNotifications = results.reduce((sum, sent) => sum + sent, 0);
 
     return NextResponse.json({
       success: true,
       summary: {
-        schedules: schedules.length,
+        schedules: totalSchedules,
         subscribers: totalSubscribers,
         notifications: totalNotifications,
       },
     });
-  } catch (error) {
-    console.error("Cron notification error:", error);
+  } catch (error: unknown) {
+    console.error(error);
 
     return NextResponse.json(
       {
         success: false,
-        message:
-          error instanceof Error
-            ? error.message
-            : "Internal Server Error",
+        message: "error.message",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

@@ -1,7 +1,7 @@
 import { login } from "@/service/auth.service";
 import { NextResponse } from "next/server";
 
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; 
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 export async function POST(request: Request) {
   try {
@@ -19,6 +19,7 @@ export async function POST(request: Request) {
     const response = NextResponse.json({
       success: true,
       message: "Login successful",
+      token,
       user: {
         id: user._id,
         fullName: user.fullName,

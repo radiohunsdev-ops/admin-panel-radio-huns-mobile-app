@@ -1,39 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
+import { OAuth2Client } from "google-auth-library";
 import jwt from "jsonwebtoken";
 
 import { connectDB } from "@/lib/db";
 import User from "@/models/User";
 
+const client = new OAuth2Client(
+  process.env.GOOGLE_WEB_CLIENT_ID
+);
+
 export async function POST(req: NextRequest) {
   try {
     await connectDB();
 
-    const { accessToken } = await req.json();
+    const { idToken } = await req.json();
 
-    if (!accessToken) {
+    if (!idToken) {
       return NextResponse.json(
-        { message: "Access token is required" },
+        { message: "ID Token is required" },
         { status: 400 }
       );
     }
 
-    const googleResponse = await fetch(
-      "https://www.googleapis.com/oauth2/v3/userinfo",
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_WEB_CLIENT_ID,
+    });
 
-    if (!googleResponse.ok) {
+    const payload = ticket.getPayload();
+
+    if (!payload) {
       return NextResponse.json(
-        { message: "Invalid Google access token" },
+        { message: "Invalid Google token" },
         { status: 401 }
       );
     }
-
-    const payload = await googleResponse.json();
 
     const {
       email,

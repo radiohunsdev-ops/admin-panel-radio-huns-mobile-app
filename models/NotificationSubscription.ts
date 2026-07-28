@@ -55,7 +55,6 @@ const NotificationSubscriptionSchema = new Schema(
     timestamps: true,
   },
 );
-
 NotificationSubscriptionSchema.index(
   {
     user: 1,

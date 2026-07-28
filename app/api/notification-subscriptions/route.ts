@@ -5,7 +5,6 @@ import { connectDB } from "@/lib/db";
 export async function POST(req: NextRequest) {
   try {
     await connectDB();
-
     const {
       userId,
       scheduleId,

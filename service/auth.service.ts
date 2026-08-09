@@ -36,7 +36,7 @@ export async function login(
     email,
   }).select("+password");
 
-  if (!user) {
+  if (!user || !user.password) {
     throw new Error("Invalid credentials");
   }
 

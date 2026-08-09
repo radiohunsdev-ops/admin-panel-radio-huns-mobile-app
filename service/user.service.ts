@@ -106,7 +106,6 @@ export async function updateProfile(
     updateData.profileImage = data.profileImage;
   }
 
-
   return await User.findByIdAndUpdate(
     userId,
     {
@@ -131,7 +130,9 @@ export async function changePassword(
   if (!user) {
     throw new Error("User not found");
   }
-
+  if (!user || !user.password) {
+    throw new Error("Invalid credentials");
+  }
   const isMatch = await bcrypt.compare(currentPassword, user.password);
 
   if (!isMatch) {

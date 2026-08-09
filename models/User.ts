@@ -5,25 +5,37 @@ export interface IUser extends Document {
   email: string;
   profileImage?: string;
   phone?: string;
-  password: string;
+  password?: string;
+
   role: "admin" | "manager" | "user";
+
   preferredLanguage?: "Hindi" | "Punjabi" | "Urdu" | "English";
+
   city?: string;
   region?: string;
+
   provider?: "email" | "google" | "apple" | "phone";
+
   emailVerified: boolean;
+
+  resetPasswordOtp?: string;
+  resetPasswordExpires?: Date;
+
   subscribedShows: mongoose.Types.ObjectId[];
+
   listeningHistory: {
     show: mongoose.Types.ObjectId;
     startedAt: Date;
     endedAt: Date;
   }[];
+
   notificationPreferences: {
     showReminder15Min: boolean;
     showReminder30Min: boolean;
     giveawayAlerts: boolean;
     newsAlerts: boolean;
   };
+
   fcmTokens: string[];
 }
 
@@ -34,22 +46,27 @@ const UserSchema = new Schema<IUser>(
       required: true,
       trim: true,
     },
+
     profileImage: {
       type: String,
       default: "",
     },
+
     email: {
       type: String,
       required: true,
       unique: true,
       lowercase: true,
+      trim: true,
     },
 
-    phone: String,
+    phone: {
+      type: String,
+    },
 
     password: {
       type: String,
-      required: true,
+      required: false,
       select: false,
     },
 
@@ -64,9 +81,13 @@ const UserSchema = new Schema<IUser>(
       enum: ["Hindi", "Punjabi", "Urdu", "English"],
     },
 
-    city: String,
+    city: {
+      type: String,
+    },
 
-    region: String,
+    region: {
+      type: String,
+    },
 
     provider: {
       type: String,
@@ -79,6 +100,17 @@ const UserSchema = new Schema<IUser>(
       default: false,
     },
 
+    // Forgot Password OTP
+    resetPasswordOtp: {
+      type: String,
+      select: false,
+    },
+
+    resetPasswordExpires: {
+      type: Date,
+      select: false,
+    },
+
     subscribedShows: [
       {
         type: Schema.Types.ObjectId,
@@ -86,7 +118,50 @@ const UserSchema = new Schema<IUser>(
       },
     ],
 
-    fcmTokens: [String],
+    listeningHistory: [
+      {
+        show: {
+          type: Schema.Types.ObjectId,
+          ref: "Show",
+        },
+
+        startedAt: {
+          type: Date,
+        },
+
+        endedAt: {
+          type: Date,
+        },
+      },
+    ],
+
+    notificationPreferences: {
+      showReminder15Min: {
+        type: Boolean,
+        default: true,
+      },
+
+      showReminder30Min: {
+        type: Boolean,
+        default: true,
+      },
+
+      giveawayAlerts: {
+        type: Boolean,
+        default: true,
+      },
+
+      newsAlerts: {
+        type: Boolean,
+        default: true,
+      },
+    },
+
+    fcmTokens: [
+      {
+        type: String,
+      },
+    ],
   },
   {
     timestamps: true,

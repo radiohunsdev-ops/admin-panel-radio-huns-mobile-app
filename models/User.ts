@@ -20,7 +20,7 @@ export interface IUser extends Document {
 
   resetPasswordOtp?: string;
   resetPasswordExpires?: Date;
-
+  appleUserId?: string;
   subscribedShows: mongoose.Types.ObjectId[];
 
   listeningHistory: {
@@ -51,7 +51,11 @@ const UserSchema = new Schema<IUser>(
       type: String,
       default: "",
     },
-
+    appleUserId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
     email: {
       type: String,
       required: true,

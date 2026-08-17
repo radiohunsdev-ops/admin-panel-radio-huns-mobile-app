@@ -67,7 +67,6 @@ export async function forgotPassword(email: string) {
     "+resetPasswordOtp +resetPasswordExpires"
   );
 
-  // Don't reveal whether the email exists
   if (!user) {
     return { message: " An OTP has been sent to the email" };
   }

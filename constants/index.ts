@@ -1,5 +1,5 @@
 import { SidebarMenuItem } from "@/types/Siderbar";
-import { Activity, Headphones, LayoutDashboard, Music2, Radio, Users } from "lucide-react";
+import { Activity, Archive, Headphones, LayoutDashboard, Music2, Radio, Users } from "lucide-react";
 
 export const menuItems: SidebarMenuItem[] = [
   {
@@ -28,11 +28,11 @@ export const menuItems: SidebarMenuItem[] = [
     icon: Headphones,
   },
   
-  // {
-  //   title: "Podcasts",
-  //   href: "/podcasts",
-  //   icon: PlayCircle,
-  // },
+  {
+    title: "Archive",
+    href: "/archive",
+    icon: Archive,
+  },
   // {
   //   title: "Journal / Blogs",
   //   href: "/blogs",

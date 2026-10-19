@@ -3,7 +3,7 @@ import "../models/show";
 import ffmpegPath from "ffmpeg-static";
 import mongoose from "mongoose";
 import { DateTime } from "luxon";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { constants, createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -782,6 +782,17 @@ async function main() {
 
   // FIX: resolve the FFmpeg binary once at startup and log it.
   ffmpegBinary = await resolveFfmpegBinary();
+
+  // Confirm the binary actually runs, not just that the file exists.
+  try {
+    const out = execFileSync(ffmpegBinary, ["-version"]).toString();
+    log("INFO", "FFmpeg is runnable", { version: out.split("\n")[0] });
+  } catch (error) {
+    log("ERROR", "FFmpeg is not runnable", {
+      ffmpegBinary,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   await mongoose.connect(MONGODB_URI!);
 

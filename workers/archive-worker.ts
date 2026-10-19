@@ -1,6 +1,6 @@
 import "dotenv/config";
 import "../models/show";
-
+import ffmpegPath from "ffmpeg-static";
 import mongoose from "mongoose";
 import { DateTime } from "luxon";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -298,6 +298,7 @@ function ffmpegArgs(
   ];
 }
 
+
 function runFfmpeg(
   streamUrl: string,
   outputPath: string,
@@ -305,10 +306,23 @@ function runFfmpeg(
   onChild: (child: ChildProcess) => void,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn("ffmpeg", ffmpegArgs(streamUrl, outputPath, seconds), {
-      stdio: ["ignore", "ignore", "pipe"],
-      windowsHide: true,
-    });
+    if (!ffmpegPath) {
+      reject(
+        new Error(
+          "FFmpeg binary is unavailable. Check the ffmpeg-static installation and deployment platform.",
+        ),
+      );
+      return;
+    }
+
+    const child = spawn(
+      ffmpegPath,
+      ffmpegArgs(streamUrl, outputPath, seconds),
+      {
+        stdio: ["ignore", "ignore", "pipe"],
+        windowsHide: true,
+      },
+    );
 
     onChild(child);
 
@@ -334,13 +348,16 @@ function runFfmpeg(
       } else {
         reject(
           new Error(
-            `FFmpeg exited with code ${code}, signal ${signal ?? "none"}. ${stderr}`,
+            `FFmpeg exited with code ${code}, signal ${
+              signal ?? "none"
+            }. ${stderr}`,
           ),
         );
       }
     });
   });
 }
+
 
 async function uploadToB2(filePath: string, key: string): Promise<string> {
   await b2.send(

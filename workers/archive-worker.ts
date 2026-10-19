@@ -298,7 +298,6 @@ function ffmpegArgs(
   ];
 }
 
-
 function runFfmpeg(
   streamUrl: string,
   outputPath: string,
@@ -315,14 +314,9 @@ function runFfmpeg(
       return;
     }
 
-    const child = spawn(
-      ffmpegPath,
-      ffmpegArgs(streamUrl, outputPath, seconds),
-      {
-        stdio: ["ignore", "ignore", "pipe"],
-        windowsHide: true,
-      },
-    );
+    const child = spawn("ffmpeg", ffmpegArgs(streamUrl, outputPath, seconds), {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
 
     onChild(child);
 
@@ -357,7 +351,6 @@ function runFfmpeg(
     });
   });
 }
-
 
 async function uploadToB2(filePath: string, key: string): Promise<string> {
   await b2.send(

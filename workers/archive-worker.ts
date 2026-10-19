@@ -140,25 +140,38 @@ function log(
 }
 
 /**
- * Prefer the binary bundled by ffmpeg-static. If it is missing or not
- * executable (e.g. install scripts were skipped), fall back to a
- * system-installed "ffmpeg" found on PATH.
+ * Binary priority:
+ * 1. FFMPEG_PATH env var (explicit override)
+ * 2. System-installed "ffmpeg" on PATH (most reliable; the static
+ *    ffmpeg-static build can segfault on network/DNS in some containers)
+ * 3. Binary bundled by ffmpeg-static
  */
 async function resolveFfmpegBinary(): Promise<string> {
+  if (process.env.FFMPEG_PATH) {
+    log("INFO", "Using FFMPEG_PATH override", {
+      ffmpegPath: process.env.FFMPEG_PATH,
+    });
+    return process.env.FFMPEG_PATH;
+  }
+
+  try {
+    execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+    log("INFO", "Using system ffmpeg from PATH");
+    return "ffmpeg";
+  } catch {
+    log("WARN", "System ffmpeg not found on PATH; trying bundled binary");
+  }
+
   if (ffmpegPath) {
     try {
       await fs.access(ffmpegPath, constants.X_OK);
       log("INFO", "Using bundled FFmpeg", { ffmpegPath });
       return ffmpegPath;
     } catch {
-      log(
-        "WARN",
-        "Bundled FFmpeg not found or not executable; falling back to system ffmpeg",
-        { ffmpegPath },
-      );
+      log("WARN", "Bundled FFmpeg not found or not executable", {
+        ffmpegPath,
+      });
     }
-  } else {
-    log("WARN", "ffmpeg-static returned no path; falling back to system ffmpeg");
   }
 
   return "ffmpeg";

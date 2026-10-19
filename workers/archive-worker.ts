@@ -139,7 +139,6 @@ function log(
   console.log(`${new Date().toISOString()} [${level}] ${message}${suffix}`);
 }
 
-
 async function resolveFfmpegBinary(): Promise<string> {
   if (!ffmpegPath) {
     throw new Error(
@@ -150,11 +149,9 @@ async function resolveFfmpegBinary(): Promise<string> {
   try {
     await fs.access(ffmpegPath, constants.X_OK);
 
-    const version = execFileSync(
-      ffmpegPath,
-      ["-version"],
-      { encoding: "utf8" },
-    );
+    const version = execFileSync(ffmpegPath, ["-version"], {
+      encoding: "utf8",
+    });
 
     log("INFO", "Bundled FFmpeg is runnable", {
       ffmpegPath,
@@ -165,12 +162,51 @@ async function resolveFfmpegBinary(): Promise<string> {
   } catch (error) {
     throw new Error(
       `Bundled FFmpeg is not runnable at "${ffmpegPath}". ` +
-      `Check the deployment build logs and binary compatibility. ` +
-      `${error instanceof Error ? error.message : String(error)}`,
+        `Check the deployment build logs and binary compatibility. ` +
+        `${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
 
+async function testFfmpegAudio(): Promise<void> {
+  log("INFO", "Testing FFmpeg audio processing", {
+    platform: process.platform,
+    architecture: process.arch,
+    ffmpegBinary,
+  });
+
+  try {
+    execFileSync(
+      ffmpegBinary,
+      [
+        "-hide_banner",
+        "-nostdin",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=1000:duration=2",
+        "-f",
+        "null",
+        "-",
+      ],
+      {
+        encoding: "utf8",
+        timeout: 10000,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    log("INFO", "FFmpeg audio self-test passed");
+  } catch (error) {
+    log("ERROR", "FFmpeg audio self-test failed", {
+      error: error instanceof Error ? error.message : String(error),
+      platform: process.platform,
+      architecture: process.arch,
+    });
+
+    throw error;
+  }
+}
 
 function validTime(value: string): boolean {
   return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
@@ -379,6 +415,12 @@ function runFfmpeg(
       if (code === 0) {
         resolve();
       } else {
+        log("ERROR", "FFmpeg recording process exited", {
+          code,
+          signal,
+          stderr: stderr.slice(-6000),
+        });
+
         reject(
           new Error(
             `FFmpeg exited with code ${code}, signal ${
@@ -789,19 +831,27 @@ async function main() {
   await ensureDir();
 
   // FIX: resolve the FFmpeg binary once at startup and log it.
-  ffmpegBinary = await resolveFfmpegBinary();
+  // ffmpegBinary = await resolveFfmpegBinary();
 
   // Confirm the binary actually runs, not just that the file exists.
-  try {
-    const out = execFileSync(ffmpegBinary, ["-version"]).toString();
-    log("INFO", "FFmpeg is runnable", { version: out.split("\n")[0] });
-  } catch (error) {
-    log("ERROR", "FFmpeg is not runnable", {
-      ffmpegBinary,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  // try {
+  //   const out = execFileSync(ffmpegBinary, ["-version"]).toString();
+  //   log("INFO", "FFmpeg is runnable", { version: out.split("\n")[0] });
+  // } catch (error) {
+  //   log("ERROR", "FFmpeg is not runnable", {
+  //     ffmpegBinary,
+  //     error: error instanceof Error ? error.message : String(error),
+  //   });
+  // }
+  ffmpegBinary = await resolveFfmpegBinary();
 
+  const out = execFileSync(ffmpegBinary, ["-version"], { encoding: "utf8" });
+
+  log("INFO", "FFmpeg is runnable", {
+    version: out.split("\n")[0],
+  });
+
+  await testFfmpegAudio();
   await mongoose.connect(MONGODB_URI!);
 
   log("INFO", "Connected to MongoDB", {

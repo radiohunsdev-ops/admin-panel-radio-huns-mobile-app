@@ -1,17 +1,17 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+    && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY package*.json ./
-
+COPY package.json package-lock.json ./
 RUN npm ci --include=dev
 
 COPY . .
 
-ENV NODE_ENV=production
+# Verify FFmpeg is installed in the image
+RUN ffmpeg -version
 
 CMD ["npm", "run", "worker:archive"]

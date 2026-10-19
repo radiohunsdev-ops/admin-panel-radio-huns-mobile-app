@@ -3,8 +3,8 @@ import "../models/show";
 import ffmpegPath from "ffmpeg-static";
 import mongoose from "mongoose";
 import { DateTime } from "luxon";
-import { spawn, type ChildProcess } from "node:child_process";
-import { createReadStream, promises as fs } from "node:fs";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { constants, createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -105,6 +105,9 @@ const pollMs = Math.max(5000, Number(POLL_INTERVAL_MS) || 15000);
 // playback URL using storageKey when an archive is requested.
 const SIGNED_URL_SECONDS = 7 * 24 * 60 * 60;
 
+// After a failed recording, wait this long before retrying the same window.
+const FAILURE_COOLDOWN_MS = 60_000;
+
 const b2 = new S3Client({
   region: B2_REGION,
   endpoint: B2_ENDPOINT,
@@ -117,6 +120,12 @@ const b2 = new S3Client({
 
 const activeJobs = new Map<string, ActiveJob>();
 
+// key -> timestamp (ms) until which this schedule window must not be retried
+const failureCooldowns = new Map<string, number>();
+
+// Resolved at startup by resolveFfmpegBinary().
+let ffmpegBinary = "ffmpeg";
+
 let shuttingDown = false;
 let pollRunning = false;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -128,6 +137,31 @@ function log(
 ) {
   const suffix = extra === undefined ? "" : ` ${JSON.stringify(extra)}`;
   console.log(`${new Date().toISOString()} [${level}] ${message}${suffix}`);
+}
+
+/**
+ * Prefer the binary bundled by ffmpeg-static. If it is missing or not
+ * executable (e.g. install scripts were skipped), fall back to a
+ * system-installed "ffmpeg" found on PATH.
+ */
+async function resolveFfmpegBinary(): Promise<string> {
+  if (ffmpegPath) {
+    try {
+      await fs.access(ffmpegPath, constants.X_OK);
+      log("INFO", "Using bundled FFmpeg", { ffmpegPath });
+      return ffmpegPath;
+    } catch {
+      log(
+        "WARN",
+        "Bundled FFmpeg not found or not executable; falling back to system ffmpeg",
+        { ffmpegPath },
+      );
+    }
+  } else {
+    log("WARN", "ffmpeg-static returned no path; falling back to system ffmpeg");
+  }
+
+  return "ffmpeg";
 }
 
 function validTime(value: string): boolean {
@@ -305,18 +339,15 @@ function runFfmpeg(
   onChild: (child: ChildProcess) => void,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    if (!ffmpegPath) {
-      reject(
-        new Error(
-          "FFmpeg binary is unavailable. Check the ffmpeg-static installation and deployment platform.",
-        ),
-      );
-      return;
-    }
-
-    const child = spawn("ffmpeg", ffmpegArgs(streamUrl, outputPath, seconds), {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
+    // FIX: spawn the resolved binary (bundled path or system fallback)
+    // instead of the bare "ffmpeg" command, which caused ENOENT.
+    const child = spawn(
+      ffmpegBinary,
+      ffmpegArgs(streamUrl, outputPath, seconds),
+      {
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
 
     onChild(child);
 
@@ -400,6 +431,14 @@ async function startRecording(
   const key = `${scheduleId}:${window.start.toISOString()}`;
 
   if (activeJobs.has(key)) return;
+
+  // FIX: respect the cooldown after a failed attempt so a broken stream
+  // or setup problem isn't retried every poll cycle.
+  const cooldownUntil = failureCooldowns.get(key);
+  if (cooldownUntil !== undefined) {
+    if (Date.now() < cooldownUntil) return;
+    failureCooldowns.delete(key);
+  }
 
   // Check for an existing archive before recording.
   const existing = await ArchivedShow.exists({
@@ -562,6 +601,8 @@ async function finishRecording(job: ActiveJob, candidates: StreamCandidate[]) {
       }
     }
 
+    failureCooldowns.delete(job.key);
+
     log("INFO", "Archive uploaded and saved", {
       title: job.title,
       scheduleId: job.scheduleId,
@@ -571,9 +612,13 @@ async function finishRecording(job: ActiveJob, candidates: StreamCandidate[]) {
       playbackUrlExpiresInSeconds: SIGNED_URL_SECONDS,
     });
   } catch (error) {
+    // FIX: back off before this window can be retried.
+    failureCooldowns.set(job.key, Date.now() + FAILURE_COOLDOWN_MS);
+
     log("ERROR", "Recording job failed", {
       title: job.title,
       scheduleId: job.scheduleId,
+      retryInSeconds: FAILURE_COOLDOWN_MS / 1000,
       error: error instanceof Error ? error.message : String(error),
     });
   } finally {
@@ -597,6 +642,13 @@ async function pollSchedules() {
 
   try {
     const now = new Date();
+
+    // Drop expired cooldown entries so the map doesn't grow forever.
+    for (const [key, until] of failureCooldowns) {
+      if (until < Date.now() - 24 * 60 * 60 * 1000) {
+        failureCooldowns.delete(key);
+      }
+    }
 
     const schedules = (await Schedule.find({
       status: { $in: ["published", "scheduled"] },
@@ -727,6 +779,21 @@ async function shutdown(signal: string) {
 
 async function main() {
   await ensureDir();
+
+  // FIX: resolve the FFmpeg binary once at startup and log it.
+  ffmpegBinary = await resolveFfmpegBinary();
+
+  // Confirm the binary actually runs, not just that the file exists.
+  try {
+    const out = execFileSync(ffmpegBinary, ["-version"]).toString();
+    log("INFO", "FFmpeg is runnable", { version: out.split("\n")[0] });
+  } catch (error) {
+    log("ERROR", "FFmpeg is not runnable", {
+      ffmpegBinary,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   await mongoose.connect(MONGODB_URI!);
 
   log("INFO", "Connected to MongoDB", {
@@ -737,6 +804,7 @@ async function main() {
     bucket: B2_BUCKET_NAME,
     region: B2_REGION,
     mode: WORKER_MODE,
+    ffmpegBinary,
   });
 
   // Run the first schedule check immediately.
@@ -755,6 +823,7 @@ async function main() {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
+
 main().catch(async (error) => {
   log("ERROR", "Worker failed to start", {
     error: error instanceof Error ? error.message : String(error),

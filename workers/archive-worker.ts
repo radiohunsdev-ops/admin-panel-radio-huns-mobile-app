@@ -4,7 +4,14 @@ import ffmpegPath from "ffmpeg-static";
 import mongoose from "mongoose";
 import { DateTime } from "luxon";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { constants, createReadStream, promises as fs } from "node:fs";
+import {
+  constants,
+  createReadStream,
+  createWriteStream,
+  promises as fs,
+} from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -56,6 +63,7 @@ type ScheduleWindow = {
 type ActiveJob = {
   key: string;
   child: ChildProcess | null;
+  abort: AbortController | null;
   outputPath: string;
   scheduleId: string;
   showId: string;
@@ -396,6 +404,55 @@ function runFfmpeg(
   });
 }
 
+/**
+ * Fallback recorder that needs no FFmpeg. Downloads the raw stream with
+ * fetch and writes it to disk for `seconds`. Only works for MP3 streams.
+ */
+async function recordDirect(
+  url: string,
+  outputPath: string,
+  seconds: number,
+  onAbort: (controller: AbortController) => void,
+): Promise<void> {
+  const controller = new AbortController();
+  onAbort(controller);
+
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, seconds * 1000);
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "RadioHunsRecorder/1.0" },
+    });
+
+    if (!res.ok || !res.body) {
+      throw new Error(`Stream responded with HTTP ${res.status}`);
+    }
+
+    const type = res.headers.get("content-type") ?? "";
+    if (!/audio\/(mpeg|mp3)/i.test(type)) {
+      throw new Error(
+        `Direct download only supports MP3 streams; got "${type || "unknown"}"`,
+      );
+    }
+
+    await pipeline(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Readable.fromWeb(res.body as any),
+      createWriteStream(outputPath),
+    );
+  } catch (error) {
+    // Hitting the planned end time aborts the download on purpose.
+    if (!timedOut) throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function uploadToB2(filePath: string, key: string): Promise<string> {
   await b2.send(
     new PutObjectCommand({
@@ -491,6 +548,7 @@ async function startRecording(
   const job: ActiveJob = {
     key,
     child: null,
+    abort: null,
     outputPath,
     scheduleId,
     showId,
@@ -563,6 +621,47 @@ async function finishRecording(job: ActiveJob, candidates: StreamCandidate[]) {
           source: candidate.source,
           error: error instanceof Error ? error.message : String(error),
         });
+
+        // Fallback: record the raw MP3 stream without FFmpeg.
+        const directSeconds = Math.floor(
+          (job.plannedEnd.getTime() - Date.now()) / 1000,
+        );
+
+        if (directSeconds >= 15) {
+          try {
+            await fs.rm(job.outputPath, { force: true });
+
+            log("WARN", "Falling back to direct MP3 download", {
+              scheduleId: job.scheduleId,
+              source: candidate.source,
+            });
+
+            await recordDirect(
+              candidate.url,
+              job.outputPath,
+              directSeconds,
+              (controller) => {
+                job.abort = controller;
+              },
+            );
+
+            job.abort = null;
+            successfulSource = `${candidate.source} (direct)`;
+            break;
+          } catch (directError) {
+            job.abort = null;
+            lastError = directError;
+
+            log("WARN", "Direct download failed", {
+              scheduleId: job.scheduleId,
+              source: candidate.source,
+              error:
+                directError instanceof Error
+                  ? directError.message
+                  : String(directError),
+            });
+          }
+        }
       }
     }
 
@@ -761,6 +860,8 @@ async function shutdown(signal: string) {
   log("WARN", `Received ${signal}; stopping FFmpeg jobs`);
 
   for (const job of activeJobs.values()) {
+    job.abort?.abort();
+
     try {
       job.child?.kill("SIGTERM");
     } catch (error) {

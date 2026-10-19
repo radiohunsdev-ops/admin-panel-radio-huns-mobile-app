@@ -64,6 +64,8 @@ type ActiveJob = {
   key: string;
   child: ChildProcess | null;
   abort: AbortController | null;
+  audioContentType: string;
+  measuredSeconds: number | null;
   outputPath: string;
   scheduleId: string;
   showId: string;
@@ -404,18 +406,28 @@ function runFfmpeg(
   });
 }
 
+class UnsupportedStreamError extends Error {}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Fallback recorder that needs no FFmpeg. Downloads the raw stream with
- * fetch and writes it to disk for `seconds`. Only works for MP3 streams.
+ * fetch and saves it as-is (no transcoding) until the planned end time.
+ * Supports MP3 (.mp3) and AAC/AAC+ (.aac). Reconnects and appends if the
+ * connection drops.
  */
 async function recordDirect(
   url: string,
-  outputPath: string,
+  job: ActiveJob,
   seconds: number,
-  onAbort: (controller: AbortController) => void,
 ): Promise<void> {
   const controller = new AbortController();
-  onAbort(controller);
+  job.abort = controller;
+
+  const startedMs = Date.now();
+  const deadline = startedMs + seconds * 1000;
 
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -423,43 +435,99 @@ async function recordDirect(
     controller.abort();
   }, seconds * 1000);
 
+  let typeChecked = false;
+  let bytesWritten = 0;
+  let consecutiveFailures = 0;
+
   try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": "RadioHunsRecorder/1.0" },
-    });
+    while (Date.now() < deadline && !controller.signal.aborted) {
+      try {
+        const res = await fetch(url, {
+          signal: controller.signal,
+          headers: { "User-Agent": "RadioHunsRecorder/1.0" },
+        });
 
-    if (!res.ok || !res.body) {
-      throw new Error(`Stream responded with HTTP ${res.status}`);
+        if (!res.ok || !res.body) {
+          throw new Error(`Stream responded with HTTP ${res.status}`);
+        }
+
+        if (!typeChecked) {
+          const type = (res.headers.get("content-type") ?? "").toLowerCase();
+
+          let ext: string;
+          let contentType: string;
+
+          if (/audio\/(mpeg|mp3)/.test(type)) {
+            ext = ".mp3";
+            contentType = "audio/mpeg";
+          } else if (/audio\/(aac|aacp|x-aac)/.test(type)) {
+            ext = ".aac";
+            contentType = "audio/aac";
+          } else {
+            throw new UnsupportedStreamError(
+              `Direct download supports MP3/AAC only; got "${type || "unknown"}"`,
+            );
+          }
+
+          job.outputPath = job.outputPath.replace(/\.[^.]+$/, ext);
+          job.audioContentType = contentType;
+          typeChecked = true;
+        }
+
+        const out = createWriteStream(job.outputPath, { flags: "a" });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const body = Readable.fromWeb(res.body as any);
+
+        body.on("data", (chunk: Buffer) => {
+          bytesWritten += chunk.length;
+        });
+
+        await pipeline(body, out);
+
+        consecutiveFailures = 0;
+      } catch (error) {
+        if (timedOut || controller.signal.aborted) break;
+        if (error instanceof UnsupportedStreamError) throw error;
+
+        consecutiveFailures++;
+
+        log("WARN", "Direct stream connection lost; will retry", {
+          scheduleId: job.scheduleId,
+          attempt: consecutiveFailures,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        if (consecutiveFailures >= 5 && bytesWritten === 0) throw error;
+        if (consecutiveFailures >= 20) throw error;
+      }
+
+      if (Date.now() < deadline && !controller.signal.aborted) {
+        await sleep(2000);
+      }
     }
-
-    const type = res.headers.get("content-type") ?? "";
-    if (!/audio\/(mpeg|mp3)/i.test(type)) {
-      throw new Error(
-        `Direct download only supports MP3 streams; got "${type || "unknown"}"`,
-      );
-    }
-
-    await pipeline(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      Readable.fromWeb(res.body as any),
-      createWriteStream(outputPath),
-    );
-  } catch (error) {
-    // Hitting the planned end time aborts the download on purpose.
-    if (!timedOut) throw error;
   } finally {
     clearTimeout(timer);
+    job.abort = null;
   }
+
+  if (bytesWritten === 0) {
+    throw new Error("Direct download wrote no data");
+  }
+
+  job.measuredSeconds = Math.max(1, Math.round((Date.now() - startedMs) / 1000));
 }
 
-async function uploadToB2(filePath: string, key: string): Promise<string> {
+async function uploadToB2(
+  filePath: string,
+  key: string,
+  contentType: string,
+): Promise<string> {
   await b2.send(
     new PutObjectCommand({
       Bucket: B2_BUCKET_NAME!,
       Key: key,
       Body: createReadStream(filePath),
-      ContentType: "audio/mpeg",
+      ContentType: contentType,
       CacheControl: "private, no-store",
     }),
   );
@@ -549,6 +617,8 @@ async function startRecording(
     key,
     child: null,
     abort: null,
+    audioContentType: "audio/mpeg",
+    measuredSeconds: null,
     outputPath,
     scheduleId,
     showId,
@@ -631,21 +701,13 @@ async function finishRecording(job: ActiveJob, candidates: StreamCandidate[]) {
           try {
             await fs.rm(job.outputPath, { force: true });
 
-            log("WARN", "Falling back to direct MP3 download", {
+            log("WARN", "Falling back to direct stream download", {
               scheduleId: job.scheduleId,
               source: candidate.source,
             });
 
-            await recordDirect(
-              candidate.url,
-              job.outputPath,
-              directSeconds,
-              (controller) => {
-                job.abort = controller;
-              },
-            );
+            await recordDirect(candidate.url, job, directSeconds);
 
-            job.abort = null;
             successfulSource = `${candidate.source} (direct)`;
             break;
           } catch (directError) {
@@ -678,14 +740,19 @@ async function finishRecording(job: ActiveJob, candidates: StreamCandidate[]) {
     }
 
     // Approximate duration for a 128 kbps CBR MP3.
-    const durationSeconds = Math.max(1, Math.round((stat.size * 8) / 128_000));
+    const durationSeconds =
+      job.measuredSeconds ?? Math.max(1, Math.round((stat.size * 8) / 128_000));
 
     const storageKey =
       `archives/${job.showId}/${job.scheduleId}/` +
       `${job.broadcastStart.toISOString().slice(0, 10)}/` +
       `${path.basename(job.outputPath)}`;
 
-    const audioUrl = await uploadToB2(job.outputPath, storageKey);
+    const audioUrl = await uploadToB2(
+      job.outputPath,
+      storageKey,
+      job.audioContentType,
+    );
 
     try {
       await ArchivedShow.create({

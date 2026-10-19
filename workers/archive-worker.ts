@@ -1,18 +1,14 @@
 import "dotenv/config";
 import "../models/show";
-import ffmpegPath from "ffmpeg-static";
 import mongoose from "mongoose";
 import { DateTime } from "luxon";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { constants, createReadStream, promises as fs } from "node:fs";
-import path from "node:path";
+import http, { type IncomingMessage } from "node:http";
+import https from "node:https";
+import { PassThrough } from "node:stream";
 import { randomUUID } from "node:crypto";
 
-import {
-  GetObjectCommand,
-  PutObjectCommand,
-  S3Client,
-} from "@aws-sdk/client-s3";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import LiveStream from "../models/LiveStream";
@@ -53,10 +49,13 @@ type ScheduleWindow = {
   timezone: string;
 };
 
+type AudioFormat = {
+  ext: string;
+  contentType: string;
+};
+
 type ActiveJob = {
   key: string;
-  child: ChildProcess | null;
-  outputPath: string;
   scheduleId: string;
   showId: string;
   broadcastStart: Date;
@@ -65,6 +64,10 @@ type ActiveJob = {
   title: string;
   host: string;
   artworkUrl: string;
+  abort: AbortController;
+  bytes: number;
+  connectedMs: number;
+  done: Promise<void> | null;
 };
 
 const {
@@ -74,7 +77,6 @@ const {
   B2_BUCKET_NAME,
   B2_KEY_ID,
   B2_APPLICATION_KEY,
-  RECORDINGS_DIR = path.resolve(process.cwd(), "recordings"),
   POLL_INTERVAL_MS = "15000",
   WORKER_ID = `radio-huns-recorder-${process.pid}`,
 } = process.env;
@@ -108,6 +110,12 @@ const SIGNED_URL_SECONDS = 7 * 24 * 60 * 60;
 // After a failed recording, wait this long before retrying the same window.
 const FAILURE_COOLDOWN_MS = 60_000;
 
+const CONNECT_IDLE_TIMEOUT_MS = 15_000; // no data for this long = dead stream
+const RECONNECT_DELAY_MS = 2_000;
+const MIN_RECORDING_BYTES = 16_000;
+const MAX_REDIRECTS = 5;
+const SHUTDOWN_WAIT_MS = 30_000;
+
 const b2 = new S3Client({
   region: B2_REGION,
   endpoint: B2_ENDPOINT,
@@ -123,9 +131,6 @@ const activeJobs = new Map<string, ActiveJob>();
 // key -> timestamp (ms) until which this schedule window must not be retried
 const failureCooldowns = new Map<string, number>();
 
-// Resolved at startup by resolveFfmpegBinary().
-let ffmpegBinary = "ffmpeg";
-
 let shuttingDown = false;
 let pollRunning = false;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -139,74 +144,10 @@ function log(
   console.log(`${new Date().toISOString()} [${level}] ${message}${suffix}`);
 }
 
-async function resolveFfmpegBinary(): Promise<string> {
-  if (!ffmpegPath) {
-    throw new Error(
-      "ffmpeg-static returned no binary path. Check the production dependency installation.",
-    );
-  }
+const errMsg = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 
-  try {
-    await fs.access(ffmpegPath, constants.X_OK);
-
-    const version = execFileSync(ffmpegPath, ["-version"], {
-      encoding: "utf8",
-    });
-
-    log("INFO", "Bundled FFmpeg is runnable", {
-      ffmpegPath,
-      version: version.split("\n")[0],
-    });
-
-    return ffmpegPath;
-  } catch (error) {
-    throw new Error(
-      `Bundled FFmpeg is not runnable at "${ffmpegPath}". ` +
-        `Check the deployment build logs and binary compatibility. ` +
-        `${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
-async function testFfmpegAudio(): Promise<void> {
-  log("INFO", "Testing FFmpeg audio processing", {
-    platform: process.platform,
-    architecture: process.arch,
-    ffmpegBinary,
-  });
-
-  try {
-    execFileSync(
-      ffmpegBinary,
-      [
-        "-hide_banner",
-        "-nostdin",
-        "-f",
-        "lavfi",
-        "-i",
-        "sine=frequency=1000:duration=2",
-        "-f",
-        "null",
-        "-",
-      ],
-      {
-        encoding: "utf8",
-        timeout: 10000,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-
-    log("INFO", "FFmpeg audio self-test passed");
-  } catch (error) {
-    log("ERROR", "FFmpeg audio self-test failed", {
-      error: error instanceof Error ? error.message : String(error),
-      platform: process.platform,
-      architecture: process.arch,
-    });
-
-    throw error;
-  }
-}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function validTime(value: string): boolean {
   return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
@@ -270,11 +211,7 @@ function getScheduleWindow(
     const endDate = end.toJSDate();
 
     if (now >= startDate && now < endDate) {
-      return {
-        start: startDate,
-        end: endDate,
-        timezone,
-      };
+      return { start: startDate, end: endDate, timezone };
     }
   }
 
@@ -291,37 +228,23 @@ function safeSlug(value: string): string {
   );
 }
 
-async function ensureDir() {
-  await fs.mkdir(RECORDINGS_DIR, { recursive: true });
-}
-
 /**
  * Priority:
  * 1. Schedule.linkedStream
  * 2. Schedule.backupStream
  * 3. Active station's streamUrl
  * 4. Active station's backupStreamUrl
- *
- * Duplicate URLs are removed while preserving their priority.
  */
 async function getStreamCandidates(
   schedule: ScheduleDocument,
 ): Promise<StreamCandidate[]> {
-  const activeStation = (await LiveStream.findOne({
-    isActive: true,
-  })
+  const activeStation = (await LiveStream.findOne({ isActive: true })
     .sort({ createdAt: 1 })
     .lean()) as unknown as LiveStreamDocument | null;
 
   const candidates: StreamCandidate[] = [
-    {
-      url: schedule.linkedStream?.trim() ?? "",
-      source: "linkedStream",
-    },
-    {
-      url: schedule.backupStream?.trim() ?? "",
-      source: "backupStream",
-    },
+    { url: schedule.linkedStream?.trim() ?? "", source: "linkedStream" },
+    { url: schedule.backupStream?.trim() ?? "", source: "backupStream" },
     {
       url: activeStation?.streamUrl?.trim() ?? "",
       source: "station.streamUrl",
@@ -338,121 +261,169 @@ async function getStreamCandidates(
   );
 }
 
-function ffmpegArgs(
-  streamUrl: string,
-  outputPath: string,
-  seconds: number,
-): string[] {
-  return [
-    "-hide_banner",
-    "-nostdin",
-    "-loglevel",
-    "warning",
-    "-y",
-    "-rw_timeout",
-    "15000000",
-    "-reconnect",
-    "1",
-    "-reconnect_streamed",
-    "1",
-    "-reconnect_delay_max",
-    "5",
-    "-i",
-    streamUrl,
-    "-t",
-    String(Math.max(1, Math.floor(seconds))),
-    "-vn",
-    "-acodec",
-    "libmp3lame",
-    "-b:a",
-    "128k",
-    "-ar",
-    "44100",
-    "-ac",
-    "2",
-    "-f",
-    "mp3",
-    outputPath,
-  ];
+/* -------------------------------------------------------------------------- */
+/*  Node.js stream capture (replaces FFmpeg)                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Maps the server's Content-Type to a file format.
+ * Streams are stored as-is (no transcoding), so only plain audio
+ * streams (Icecast / Shoutcast style MP3, AAC, Ogg) are supported.
+ */
+function detectFormat(contentType: string | undefined): AudioFormat {
+  const type = (contentType ?? "").split(";")[0]!.trim().toLowerCase();
+
+  if (type === "audio/mpeg" || type === "audio/mp3") {
+    return { ext: "mp3", contentType: "audio/mpeg" };
+  }
+  if (type === "audio/aac" || type === "audio/aacp") {
+    return { ext: "aac", contentType: "audio/aac" };
+  }
+  if (type === "audio/ogg" || type === "application/ogg") {
+    return { ext: "ogg", contentType: "audio/ogg" };
+  }
+
+  if (
+    type.includes("mpegurl") || // HLS playlists
+    type.startsWith("text/") ||
+    type === "application/json"
+  ) {
+    throw new Error(
+      `Unsupported stream type "${type}" (HLS/playlist/web page). ` +
+        `Use a direct audio stream URL.`,
+    );
+  }
+
+  // Many radio servers send nothing useful. Assume MP3.
+  return { ext: "mp3", contentType: "audio/mpeg" };
 }
 
-function runFfmpeg(
-  streamUrl: string,
-  outputPath: string,
-  seconds: number,
-  onChild: (child: ChildProcess) => void,
-): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    // FIX: spawn the resolved binary (bundled path or system fallback)
-    // instead of the bare "ffmpeg" command, which caused ENOENT.
-    const child = spawn(
-      ffmpegBinary,
-      ffmpegArgs(streamUrl, outputPath, seconds),
+/**
+ * Opens a live HTTP audio stream. Uses node:http(s) instead of fetch because
+ * Shoutcast v1 servers reply with "ICY 200 OK", which fetch rejects.
+ * Follows redirects and asks for no inline ICY metadata, which would
+ * otherwise corrupt the saved audio.
+ */
+function openAudioStream(
+  url: string,
+  signal: AbortSignal,
+  redirects = 0,
+): Promise<IncomingMessage> {
+  return new Promise((resolve, reject) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      reject(new Error(`Invalid stream URL: ${url}`));
+      return;
+    }
+
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      reject(new Error(`Unsupported protocol ${parsed.protocol}`));
+      return;
+    }
+
+    const client = parsed.protocol === "https:" ? https : http;
+
+    const req = client.get(
+      parsed,
       {
-        stdio: ["ignore", "ignore", "pipe"],
+        signal,
+        headers: {
+          "User-Agent": "RadioHunsRecorder/1.0",
+          Accept: "*/*",
+          "Icy-MetaData": "0",
+          Connection: "close",
+        },
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+
+        if ([301, 302, 303, 307, 308].includes(status)) {
+          res.resume();
+          const location = res.headers.location;
+
+          if (!location) {
+            reject(new Error(`Redirect ${status} without Location header`));
+            return;
+          }
+          if (redirects >= MAX_REDIRECTS) {
+            reject(new Error("Too many redirects"));
+            return;
+          }
+
+          openAudioStream(
+            new URL(location, parsed).toString(),
+            signal,
+            redirects + 1,
+          ).then(resolve, reject);
+          return;
+        }
+
+        if (status !== 200) {
+          res.resume();
+          reject(new Error(`Stream responded with HTTP ${status}`));
+          return;
+        }
+
+        resolve(res);
       },
     );
 
-    onChild(child);
+    // Covers both connect time and mid-stream silence (socket idle timeout).
+    req.setTimeout(CONNECT_IDLE_TIMEOUT_MS, () => {
+      req.destroy(new Error("Stream connection timed out / went silent"));
+    });
 
-    let stderr = "";
+    req.once("error", reject);
+  });
+}
+
+/**
+ * Pipes a live response into the shared sink WITHOUT ending the sink, so a
+ * reconnect (or backup stream) continues the same recording.
+ * Honors backpressure. Resolves when the stream ends, drops, or is aborted.
+ */
+function pumpInto(
+  res: IncomingMessage,
+  sink: PassThrough,
+  job: ActiveJob,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const connectedAt = Date.now();
     let settled = false;
 
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString()).slice(-8000);
-    });
-
-    child.once("error", (error) => {
+    const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
-      reject(error);
-    });
+      job.connectedMs += Date.now() - connectedAt;
+      sink.off("drain", onDrain);
 
-    child.once("close", (code, signal) => {
-      if (settled) return;
-      settled = true;
+      if (error && !job.abort.signal.aborted) reject(error);
+      else resolve();
+    };
 
-      if (code === 0) {
-        resolve();
-      } else {
-        log("ERROR", "FFmpeg recording process exited", {
-          code,
-          signal,
-          stderr: stderr.slice(-6000),
-        });
+    const onDrain = () => res.resume();
 
-        reject(
-          new Error(
-            `FFmpeg exited with code ${code}, signal ${
-              signal ?? "none"
-            }. ${stderr}`,
-          ),
-        );
+    res.on("data", (chunk: Buffer) => {
+      job.bytes += chunk.length;
+      if (!sink.write(chunk)) {
+        res.pause();
+        sink.once("drain", onDrain);
       }
+    });
+
+    res.once("end", () => finish());
+    res.once("close", () => finish());
+    res.once("error", (error) => finish(error));
+    sink.once("error", (error) => {
+      res.destroy();
+      finish(error);
     });
   });
 }
 
-async function uploadToB2(filePath: string, key: string): Promise<string> {
-  await b2.send(
-    new PutObjectCommand({
-      Bucket: B2_BUCKET_NAME!,
-      Key: key,
-      Body: createReadStream(filePath),
-      ContentType: "audio/mpeg",
-      CacheControl: "private, no-store",
-    }),
-  );
-
-  return getSignedUrl(
-    b2,
-    new GetObjectCommand({
-      Bucket: B2_BUCKET_NAME!,
-      Key: key,
-    }),
-    { expiresIn: SIGNED_URL_SECONDS },
-  );
-}
+/* -------------------------------------------------------------------------- */
 
 async function startRecording(
   schedule: ScheduleDocument,
@@ -482,15 +453,12 @@ async function startRecording(
 
   if (activeJobs.has(key)) return;
 
-  // FIX: respect the cooldown after a failed attempt so a broken stream
-  // or setup problem isn't retried every poll cycle.
   const cooldownUntil = failureCooldowns.get(key);
   if (cooldownUntil !== undefined) {
     if (Date.now() < cooldownUntil) return;
     failureCooldowns.delete(key);
   }
 
-  // Check for an existing archive before recording.
   const existing = await ArchivedShow.exists({
     schedule: schedule._id,
     broadcastDate: window.start,
@@ -516,19 +484,10 @@ async function startRecording(
     return;
   }
 
-  await ensureDir();
-
   const title = String(show.showName || show.shortTitle || "Radio Huns Show");
-
-  const base =
-    `${safeSlug(title)}-` + window.start.toISOString().replace(/[:.]/g, "-");
-
-  const outputPath = path.join(RECORDINGS_DIR, `${base}-${randomUUID()}.mp3`);
 
   const job: ActiveJob = {
     key,
-    child: null,
-    outputPath,
     scheduleId,
     showId,
     broadcastStart: window.start,
@@ -537,6 +496,10 @@ async function startRecording(
     title,
     host: typeof show.host === "string" ? show.host : "",
     artworkUrl: String(show.coverImage || ""),
+    abort: new AbortController(),
+    bytes: 0,
+    connectedMs: 0,
+    done: null,
   };
 
   activeJobs.set(key, job);
@@ -551,79 +514,147 @@ async function startRecording(
     remainingSeconds,
   });
 
-  void finishRecording(job, candidates);
+  job.done = finishRecording(job, candidates);
 }
 
 async function finishRecording(job: ActiveJob, candidates: StreamCandidate[]) {
-  let successfulSource: string | undefined;
-  let lastError: unknown;
+  const sources = new Set<string>();
+
+  let format: AudioFormat | undefined;
+  let storageKey = "";
+  let sink: PassThrough | undefined;
+  let upload: Upload | undefined;
+  let uploadDone: Promise<unknown> | undefined;
+
+  // Stop capturing at the scheduled end time.
+  const stopTimer = setTimeout(
+    () => job.abort.abort(),
+    Math.max(0, job.plannedEnd.getTime() - Date.now()),
+  );
 
   try {
-    for (let i = 0; i < candidates.length; i++) {
-      const candidate = candidates[i];
-      if (!candidate) continue;
+    let failedAttemptsBeforeStart = 0;
 
-      // Recalculate the remaining time after each failed stream.
-      const remainingSeconds = Math.floor(
-        (job.plannedEnd.getTime() - Date.now()) / 1000,
-      );
+    capture: while (
+      !job.abort.signal.aborted &&
+      Date.now() < job.plannedEnd.getTime() - 1000
+    ) {
+      let gotStream = false;
 
-      if (remainingSeconds < 15) {
-        log("WARN", "Not enough scheduled time remains for another stream", {
-          scheduleId: job.scheduleId,
-          remainingSeconds,
-        });
-        break;
+      for (const candidate of candidates) {
+        if (
+          job.abort.signal.aborted ||
+          Date.now() >= job.plannedEnd.getTime() - 1000
+        ) {
+          break capture;
+        }
+
+        try {
+          const res = await openAudioStream(candidate.url, job.abort.signal);
+          const detected = detectFormat(res.headers["content-type"]);
+
+          if (format && format.ext !== detected.ext) {
+            res.destroy();
+            throw new Error(
+              `Format mismatch: recording is ${format.ext}, ` +
+                `${candidate.source} is ${detected.ext}`,
+            );
+          }
+
+          // First successful connection decides the file format
+          // and starts the streaming upload to B2.
+          if (!format) {
+            format = detected;
+
+            storageKey =
+              `archives/${job.showId}/${job.scheduleId}/` +
+              `${job.broadcastStart.toISOString().slice(0, 10)}/` +
+              `${safeSlug(job.title)}-` +
+              `${job.broadcastStart.toISOString().replace(/[:.]/g, "-")}-` +
+              `${randomUUID()}.${format.ext}`;
+
+            sink = new PassThrough({ highWaterMark: 1024 * 1024 });
+
+            upload = new Upload({
+              client: b2,
+              params: {
+                Bucket: B2_BUCKET_NAME!,
+                Key: storageKey,
+                Body: sink,
+                ContentType: format.contentType,
+                CacheControl: "private, no-store",
+              },
+              queueSize: 3,
+              partSize: 5 * 1024 * 1024,
+              leavePartsOnError: false,
+            });
+
+            uploadDone = upload.done();
+            // Avoid an unhandled rejection before we await it below.
+            uploadDone.catch(() => undefined);
+          }
+
+          sources.add(candidate.source);
+          gotStream = true;
+
+          log("INFO", "Connected to stream", {
+            scheduleId: job.scheduleId,
+            source: candidate.source,
+            contentType: res.headers["content-type"],
+            bitrate: res.headers["icy-br"],
+          });
+
+          await pumpInto(res, sink!, job);
+
+          log("WARN", "Stream ended before scheduled end; reconnecting", {
+            scheduleId: job.scheduleId,
+            source: candidate.source,
+          });
+        } catch (error) {
+          if (job.abort.signal.aborted) break capture;
+
+          log("WARN", "Stream attempt failed", {
+            scheduleId: job.scheduleId,
+            source: candidate.source,
+            error: errMsg(error),
+          });
+        }
       }
 
-      try {
-        await fs.rm(job.outputPath, { force: true });
+      if (!format) {
+        failedAttemptsBeforeStart++;
+        // Nothing ever connected: give up after a few full passes.
+        if (failedAttemptsBeforeStart >= 3) {
+          throw new Error("All stream sources failed to connect");
+        }
+      }
 
-        await runFfmpeg(
-          candidate.url,
-          job.outputPath,
-          remainingSeconds,
-          (child) => {
-            job.child = child;
-          },
-        );
-
-        job.child = null;
-        successfulSource = candidate.source;
-        break;
-      } catch (error) {
-        job.child = null;
-        lastError = error;
-
-        log("WARN", `Stream attempt ${i + 1} failed`, {
-          scheduleId: job.scheduleId,
-          source: candidate.source,
-          error: error instanceof Error ? error.message : String(error),
-        });
+      if (!gotStream || !job.abort.signal.aborted) {
+        await sleep(RECONNECT_DELAY_MS);
       }
     }
 
-    if (!successfulSource) {
-      throw lastError instanceof Error
-        ? lastError
-        : new Error("All stream sources failed or no scheduled time remained");
+    if (!sink || !upload || !uploadDone || !format) {
+      throw new Error("No audio was captured");
     }
 
-    const stat = await fs.stat(job.outputPath);
-
-    if (stat.size < 16_000) {
-      throw new Error(`Recording file too small (${stat.size} bytes)`);
+    if (job.bytes < MIN_RECORDING_BYTES) {
+      await upload.abort();
+      sink.destroy();
+      throw new Error(`Recording too small (${job.bytes} bytes)`);
     }
 
-    // Approximate duration for a 128 kbps CBR MP3.
-    const durationSeconds = Math.max(1, Math.round((stat.size * 8) / 128_000));
+    // Finish the upload (completes the multipart upload).
+    sink.end();
+    await uploadDone;
 
-    const storageKey =
-      `archives/${job.showId}/${job.scheduleId}/` +
-      `${job.broadcastStart.toISOString().slice(0, 10)}/` +
-      `${path.basename(job.outputPath)}`;
+    const durationSeconds = Math.max(1, Math.round(job.connectedMs / 1000));
 
-    const audioUrl = await uploadToB2(job.outputPath, storageKey);
+    const audioUrl = await getSignedUrl(
+      b2,
+      new GetObjectCommand({ Bucket: B2_BUCKET_NAME!, Key: storageKey }),
+      { expiresIn: SIGNED_URL_SECONDS },
+    );
 
     try {
       await ArchivedShow.create({
@@ -657,31 +688,31 @@ async function finishRecording(job: ActiveJob, candidates: StreamCandidate[]) {
       title: job.title,
       scheduleId: job.scheduleId,
       storageKey,
-      successfulSource,
+      sources: [...sources],
+      bytes: job.bytes,
       durationSeconds,
       playbackUrlExpiresInSeconds: SIGNED_URL_SECONDS,
     });
   } catch (error) {
-    // FIX: back off before this window can be retried.
+    // Discard any half-finished multipart upload.
+    try {
+      await upload?.abort();
+    } catch {
+      // ignore
+    }
+    sink?.destroy();
+
     failureCooldowns.set(job.key, Date.now() + FAILURE_COOLDOWN_MS);
 
     log("ERROR", "Recording job failed", {
       title: job.title,
       scheduleId: job.scheduleId,
       retryInSeconds: FAILURE_COOLDOWN_MS / 1000,
-      error: error instanceof Error ? error.message : String(error),
+      error: errMsg(error),
     });
   } finally {
+    clearTimeout(stopTimer);
     activeJobs.delete(job.key);
-
-    try {
-      await fs.rm(job.outputPath, { force: true });
-    } catch (error) {
-      log("WARN", "Could not remove local recording file", {
-        path: job.outputPath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 }
 
@@ -693,7 +724,6 @@ async function pollSchedules() {
   try {
     const now = new Date();
 
-    // Drop expired cooldown entries so the map doesn't grow forever.
     for (const [key, until] of failureCooldowns) {
       if (until < Date.now() - 24 * 60 * 60 * 1000) {
         failureCooldowns.delete(key);
@@ -728,7 +758,6 @@ async function pollSchedules() {
                 "Unknown show",
             );
 
-            // Temporarily log schedules that run today or the test show.
             if (
               days.includes(localDay) ||
               showName.toLowerCase().includes("punjabi top 10")
@@ -749,8 +778,6 @@ async function pollSchedules() {
           continue;
         }
 
-        // Resolve URLs in check mode too, so you can verify which
-        // stream sources are available without starting FFmpeg.
         const candidates = await getStreamCandidates(schedule);
 
         if (WORKER_MODE === "check") {
@@ -775,14 +802,12 @@ async function pollSchedules() {
       } catch (error) {
         log("ERROR", "Unable to evaluate schedule", {
           scheduleId: String(schedule._id),
-          error: error instanceof Error ? error.message : String(error),
+          error: errMsg(error),
         });
       }
     }
   } catch (error) {
-    log("ERROR", "Schedule polling failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
+    log("ERROR", "Schedule polling failed", { error: errMsg(error) });
   } finally {
     pollRunning = false;
   }
@@ -795,32 +820,19 @@ async function shutdown(signal: string) {
 
   if (pollTimer) clearInterval(pollTimer);
 
-  log("WARN", `Received ${signal}; stopping FFmpeg jobs`);
+  log("WARN", `Received ${signal}; finalizing active recordings`, {
+    activeJobs: activeJobs.size,
+  });
 
+  // Aborting stops the capture; finishRecording() then completes the upload
+  // so the partial show is still archived instead of lost.
+  const pending: Promise<void>[] = [];
   for (const job of activeJobs.values()) {
-    try {
-      job.child?.kill("SIGTERM");
-    } catch (error) {
-      log("WARN", "Could not stop FFmpeg process", {
-        scheduleId: job.scheduleId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    job.abort.abort();
+    if (job.done) pending.push(job.done);
   }
 
-  const deadline = Date.now() + 10_000;
-
-  while (activeJobs.size > 0 && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-
-  for (const job of activeJobs.values()) {
-    try {
-      job.child?.kill("SIGKILL");
-    } catch {
-      // The child may already have exited.
-    }
-  }
+  await Promise.race([Promise.allSettled(pending), sleep(SHUTDOWN_WAIT_MS)]);
 
   await mongoose.disconnect();
   b2.destroy();
@@ -828,44 +840,21 @@ async function shutdown(signal: string) {
 }
 
 async function main() {
-  await ensureDir();
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  // FIX: resolve the FFmpeg binary once at startup and log it.
-  // ffmpegBinary = await resolveFfmpegBinary();
-
-  // Confirm the binary actually runs, not just that the file exists.
-  // try {
-  //   const out = execFileSync(ffmpegBinary, ["-version"]).toString();
-  //   log("INFO", "FFmpeg is runnable", { version: out.split("\n")[0] });
-  // } catch (error) {
-  //   log("ERROR", "FFmpeg is not runnable", {
-  //     ffmpegBinary,
-  //     error: error instanceof Error ? error.message : String(error),
-  //   });
-  // }
-  ffmpegBinary = await resolveFfmpegBinary();
-
-  const out = execFileSync(ffmpegBinary, ["-version"], { encoding: "utf8" });
-
-  log("INFO", "FFmpeg is runnable", {
-    version: out.split("\n")[0],
-  });
-
-  await testFfmpegAudio();
   await mongoose.connect(MONGODB_URI!);
 
   log("INFO", "Connected to MongoDB", {
     worker: WORKER_ID,
-    recordingsDir: RECORDINGS_DIR,
     pollIntervalMs: pollMs,
-    storage: "Backblaze B2",
+    capture: "node-streams",
+    storage: "Backblaze B2 (streaming multipart upload)",
     bucket: B2_BUCKET_NAME,
     region: B2_REGION,
     mode: WORKER_MODE,
-    ffmpegBinary,
   });
 
-  // Run the first schedule check immediately.
   await pollSchedules();
 
   log("INFO", "Worker polling started", {
@@ -873,19 +862,13 @@ async function main() {
     pollIntervalMs: pollMs,
   });
 
-  // Continue checking every pollMs milliseconds.
   pollTimer = setInterval(() => {
     void pollSchedules();
   }, pollMs);
-
-  process.on("SIGINT", () => void shutdown("SIGINT"));
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
 main().catch(async (error) => {
-  log("ERROR", "Worker failed to start", {
-    error: error instanceof Error ? error.message : String(error),
-  });
+  log("ERROR", "Worker failed to start", { error: errMsg(error) });
 
   await mongoose.disconnect().catch(() => undefined);
   b2.destroy();
